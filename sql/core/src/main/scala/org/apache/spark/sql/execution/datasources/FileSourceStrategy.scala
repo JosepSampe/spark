@@ -29,7 +29,9 @@ import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.planning.ScanOperation
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.types.DataTypeUtils
-import org.apache.spark.sql.execution.{FileSourceScanExec, SparkPlan}
+import org.apache.spark.sql.connector.expressions.FieldReference
+import org.apache.spark.sql.execution.{BroadcastVarFilterCollector, FileSourceScanExec, SparkPlan}
+import org.apache.spark.sql.execution.datasources.parquet.ParquetFileFormat
 import org.apache.spark.sql.types.{DoubleType, FloatType, StructType}
 import org.apache.spark.util.collection.BitSet
 
@@ -310,9 +312,17 @@ object FileSourceStrategy extends Strategy with PredicateHelper with Logging {
           }
         }
 
+      val broadcastVarCollector = fsRelation.fileFormat match {
+        case _: ParquetFileFormat => Some(BroadcastVarFilterCollector(outputAttributes.toStructType,
+          fsRelation.partitionSchema.map(sf => FieldReference.column(sf.name)).toArray))
+
+        case _ => None
+      }
+
       val scan =
         FileSourceScanExec(
           fsRelation,
+          broadcastVarCollector,
           outputAttributes,
           outputDataSchema,
           partitionKeyFilters.toSeq,

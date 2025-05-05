@@ -41,10 +41,16 @@ import org.apache.spark.sql.vectorized.ColumnarBatch
  */
 abstract class QueryStageExec extends LeafExecNode {
 
+  // This flag should be relied to identify whether the Join is a "SELf_PUSH" only if it
+  // the exchange is original ( i.e not reused) else it can give false positive.
+  val hasStreamSidePushdownDependent = false
+
   /**
    * An id of this query stage which is unique in the entire query plan.
    */
   val id: Int
+
+  val reuseSource: Option[Int]
 
   /**
    * The sub-tree of the query plan that belongs to this query stage.
@@ -167,7 +173,10 @@ abstract class ExchangeQueryStageExec extends QueryStageExec {
 
   override def doCanonicalize(): SparkPlan = _canonicalized
 
-  def newReuseInstance(newStageId: Int, newOutput: Seq[Attribute]): ExchangeQueryStageExec
+  def newReuseInstance(
+                        newStageId: Int,
+                        newOutput: Seq[Attribute],
+                        hasStreamSidePushdownDependent: Boolean): ExchangeQueryStageExec
 }
 
 /**
@@ -180,7 +189,8 @@ abstract class ExchangeQueryStageExec extends QueryStageExec {
 case class ShuffleQueryStageExec(
     override val id: Int,
     override val plan: SparkPlan,
-    override val _canonicalized: SparkPlan) extends ExchangeQueryStageExec {
+    override val _canonicalized: SparkPlan,
+    override val reuseSource: Option[Int] = None) extends ExchangeQueryStageExec {
 
   @transient val shuffle = plan match {
     case s: ShuffleExchangeLike => s
@@ -196,11 +206,13 @@ case class ShuffleQueryStageExec(
   override protected def doMaterialize(): Future[Any] = shuffleFuture
 
   override def newReuseInstance(
-      newStageId: Int, newOutput: Seq[Attribute]): ExchangeQueryStageExec = {
+                                 newStageId: Int,
+                                 newOutput: Seq[Attribute],
+                                 hasStreamSidePushdownDependent: Boolean): ExchangeQueryStageExec = {
     val reuse = ShuffleQueryStageExec(
       newStageId,
       ReusedExchangeExec(newOutput, shuffle),
-      _canonicalized)
+      _canonicalized, Option(this.id))
     reuse._resultOption = this._resultOption
     reuse._error = this._error
     reuse
@@ -235,7 +247,9 @@ case class ShuffleQueryStageExec(
 case class BroadcastQueryStageExec(
     override val id: Int,
     override val plan: SparkPlan,
-    override val _canonicalized: SparkPlan) extends ExchangeQueryStageExec {
+    override val _canonicalized: SparkPlan,
+    override val reuseSource: Option[Int] = None,
+    override val hasStreamSidePushdownDependent: Boolean = false) extends ExchangeQueryStageExec {
 
   @transient val broadcast = plan match {
     case b: BroadcastExchangeLike => b
@@ -249,11 +263,15 @@ case class BroadcastQueryStageExec(
   }
 
   override def newReuseInstance(
-      newStageId: Int, newOutput: Seq[Attribute]): ExchangeQueryStageExec = {
+                                 newStageId: Int,
+                                 newOutput: Seq[Attribute],
+                                 hasStreamSidePushdownDependent: Boolean): ExchangeQueryStageExec = {
     val reuse = BroadcastQueryStageExec(
       newStageId,
       ReusedExchangeExec(newOutput, broadcast),
-      _canonicalized)
+      _canonicalized,
+      Option(this.id),
+      hasStreamSidePushdownDependent = hasStreamSidePushdownDependent)
     reuse._resultOption = this._resultOption
     reuse._error = this._error
     reuse
@@ -279,6 +297,7 @@ case class TableCacheQueryStageExec(
     override val id: Int,
     override val plan: SparkPlan) extends QueryStageExec {
 
+  val reuseSource: Option[Int] = None
   @transient val inMemoryTableScan = plan match {
     case i: InMemoryTableScanLike => i
     case _ =>
