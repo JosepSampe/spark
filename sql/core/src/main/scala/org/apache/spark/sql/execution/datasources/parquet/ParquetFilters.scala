@@ -21,7 +21,7 @@ import java.lang.{Boolean => JBoolean, Byte => JByte, Double => JDouble, Float =
 import java.math.{BigDecimal => JBigDecimal}
 import java.nio.charset.StandardCharsets.UTF_8
 import java.sql.{Date, Timestamp}
-import java.time.{Duration, Instant, LocalDate, Period}
+import java.time.{Duration, Instant, LocalDate, LocalTime, Period}
 import java.util.HashSet
 import java.util.Locale
 
@@ -885,7 +885,7 @@ object ParquetFilters {
 
   def toLongValue(v: Any): JLong = v match {
     case d: Duration => IntervalUtils.durationToMicros(d)
-    case lt: LocalTime => DateTimeUtils.localTimeToMicros(lt)
+    case lt: LocalTime => localTimeToMicros(lt)
     case l => l.asInstanceOf[JLong]
   }
 
@@ -898,6 +898,12 @@ object ParquetFilters {
       case LegacyBehaviorPolicy.LEGACY => rebaseGregorianToJulianDays(gregorianDays)
       case _ => gregorianDays
     }
+  }
+
+  def localTimeToMicros(lt: LocalTime): Long = {
+    val microsPerSecond = 1000000L
+    val micros = lt.toSecondOfDay * microsPerSecond + lt.getNano / 1000
+    micros
   }
 
   def timestampToMicros(v: Any, datetimeRebaseSpec: RebaseSpec): JLong = {

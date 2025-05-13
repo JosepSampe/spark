@@ -541,6 +541,32 @@ case class Union(
     copy(children = newChildren)
 }
 
+object Join {
+  val PRESERVE_JOIN_WITH_SELF_PUSH_HASH =
+    TreeNodeTag[(BuildSide, LogicalPlan)]("buildside_original_build_plan_self_push")
+
+  def computeOutput(
+                     joinType: JoinType,
+                     leftOutput: Seq[Attribute],
+                     rightOutput: Seq[Attribute]
+                   ): Seq[Attribute] = {
+    joinType match {
+      case j: ExistenceJoin =>
+        leftOutput :+ j.exists
+      case LeftExistence(_) =>
+        leftOutput
+      case LeftOuter =>
+        leftOutput ++ rightOutput.map(_.withNullability(true))
+      case RightOuter =>
+        leftOutput.map(_.withNullability(true)) ++ rightOutput
+      case FullOuter =>
+        leftOutput.map(_.withNullability(true)) ++ rightOutput.map(_.withNullability(true))
+      case _ =>
+        leftOutput ++ rightOutput
+    }
+  }
+}
+
 case class Join(
     left: LogicalPlan,
     right: LogicalPlan,

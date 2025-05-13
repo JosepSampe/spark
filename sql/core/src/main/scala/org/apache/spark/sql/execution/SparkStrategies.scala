@@ -229,7 +229,6 @@ abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
           .copy(bcVarPushNode = SELF_PUSH)
         bhj.preserveLogicalJoinAsHashSelfPush(Option(originalBuildLp))
 
-        def apply(plan: LogicalPlan): Seq[SparkPlan] = plan match {
         bhj :: Nil
 
       // If it is an equi-join, we first look at the join hints w.r.t. the following order:
@@ -256,9 +255,6 @@ abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
         def createBroadcastHashJoin(onlyLookingAtHint: Boolean) = {
           val buildSide = getBroadcastBuildSide(
             left, right, joinType, hint, onlyLookingAtHint, conf, broadcastedCanonicalizedSubplans)
-
-          val buildSide = getBroadcastBuildSide(j, onlyLookingAtHint, conf,
-            broadcastedCanonicalizedSubplans)
 
           checkHintBuildSide(onlyLookingAtHint, buildSide, joinType, hint, true)
           buildSide.map {
@@ -327,7 +323,8 @@ abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
               // Build the smaller side unless the join requires a particular build side
               // (e.g. NO_BROADCAST_AND_REPLICATION hint)
               val requiredBuildSide = getBroadcastNestedLoopJoinBuildSide(hint)
-              val buildSide = requiredBuildSide.getOrElse(getSmallerSide(left, right, mutable.Set.empty))
+              val buildSide = requiredBuildSide.getOrElse(
+                getSmallerSide(left, right, mutable.Set.empty))
 
               Seq(joins.BroadcastNestedLoopJoinExec(
                 planLater(left), planLater(right), buildSide, joinType, j.condition))

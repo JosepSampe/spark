@@ -206,9 +206,9 @@ case class ShuffleQueryStageExec(
   override protected def doMaterialize(): Future[Any] = shuffleFuture
 
   override def newReuseInstance(
-                                 newStageId: Int,
-                                 newOutput: Seq[Attribute],
-                                 hasStreamSidePushdownDependent: Boolean): ExchangeQueryStageExec = {
+     newStageId: Int,
+     newOutput: Seq[Attribute],
+     hasStreamSidePushdownDependent: Boolean): ExchangeQueryStageExec = {
     val reuse = ShuffleQueryStageExec(
       newStageId,
       ReusedExchangeExec(newOutput, shuffle),
@@ -263,9 +263,9 @@ case class BroadcastQueryStageExec(
   }
 
   override def newReuseInstance(
-                                 newStageId: Int,
-                                 newOutput: Seq[Attribute],
-                                 hasStreamSidePushdownDependent: Boolean): ExchangeQueryStageExec = {
+     newStageId: Int,
+     newOutput: Seq[Attribute],
+     hasStreamSidePushdownDependent: Boolean): ExchangeQueryStageExec = {
     val reuse = BroadcastQueryStageExec(
       newStageId,
       ReusedExchangeExec(newOutput, broadcast),

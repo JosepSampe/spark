@@ -323,6 +323,7 @@ object FileSourceStrategy extends Strategy with PredicateHelper with Logging {
         FileSourceScanExec(
           fsRelation,
           broadcastVarCollector,
+          None,
           outputAttributes,
           outputDataSchema,
           partitionKeyFilters.toSeq,

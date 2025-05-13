@@ -23,7 +23,6 @@ import java.util.concurrent.TimeUnit._
 import scala.collection.mutable
 
 import com.google.common.base.Objects
-
 import org.apache.commons.lang3.StringUtils
 import org.apache.hadoop.fs.Path
 
@@ -39,6 +38,7 @@ import org.apache.spark.sql.catalyst.util.{truncatedString, CaseInsensitiveMap}
 import org.apache.spark.sql.connector.expressions.{FieldReference, NamedReference}
 import org.apache.spark.sql.connector.expressions.filter.{Predicate => ConnectorPredicate}
 import org.apache.spark.sql.connector.read.{PushedBroadcastFilterData, SupportsBroadcastVarPushdownFiltering}
+import org.apache.spark.sql.connector.read.streaming.SparkDataStream
 import org.apache.spark.sql.errors.QueryExecutionErrors
 import org.apache.spark.sql.execution.datasources._
 import org.apache.spark.sql.execution.datasources.parquet.{ParquetFileFormat => ParquetSource}
@@ -519,6 +519,7 @@ trait FileSourceScanLike extends DataSourceScanExec {
 case class FileSourceScanExec(
     @transient override val relation: HadoopFsRelation,
     @transient broadcastVarCollector: Option[BroadcastVarFilterCollector],
+    @transient stream: Option[SparkDataStream],
     override val output: Seq[Attribute],
     override val requiredSchema: StructType,
     override val partitionFilters: Seq[Expression],
@@ -842,6 +843,7 @@ case class FileSourceScanExec(
     FileSourceScanExec(
       relation,
       nullSafebcCollector,
+      None,
       output.map(QueryPlan.normalizeExpressions(_, output)),
       requiredSchema,
       QueryPlan.normalizePredicates(
@@ -857,7 +859,7 @@ case class FileSourceScanExec(
 }
 
 case class BroadcastVarFilterCollector(override val readSchema: StructType,
-                                       partitionAttribs: Array[NamedReference]) extends SupportsBroadcastVarPushdownFiltering {
+   partitionAttribs: Array[NamedReference]) extends SupportsBroadcastVarPushdownFiltering {
 
   val broadcastVarFilterExpressions: mutable.Set[Filter] = mutable.LinkedHashSet.empty
 

@@ -18,8 +18,6 @@
 package org.apache.spark.sql.execution
 
 import org.apache.spark.broadcast
-import org.apache.spark.internal.LogKeys.{BATCH_SCAN_EXEC, NON_PARTITION_ATTRIBUTES}
-import org.apache.spark.internal.MDC
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{And, Attribute, BindReferences, Expression, InWithBroadcastVar, SortOrder, SpecializedGetters}
@@ -227,15 +225,13 @@ case class ColumnarToRowExec(child: SparkPlan) extends ColumnarToRowTransition w
             .map(allAttribs(_)))
         .filterNot(name => partitionColNames.contains(name))
       if (nonPartitionAttribs.nonEmpty) {
-        this.logWarning(log"Proxy for pushed broadcast var found, but no pushed filter data " +
-          log"returned : ${MDC(BATCH_SCAN_EXEC, batchScanOpt.get.toString)}. " +
-          log"Having missing BCVar corresponding to " +
-          log"${MDC(NON_PARTITION_ATTRIBUTES, nonPartitionAttribs.mkString(","))}")
+        this.logWarning("Proxy for pushed broadcast var found, but no pushed filter data")
       }
     }
   }
 
-  private def getPushedBroadcastVarFilters: (Option[WrapsBroadcastVarPushDownSupporter], scala.collection.Seq[PushedBroadcastFilterData]) =
+  private def getPushedBroadcastVarFilters:
+  (Option[WrapsBroadcastVarPushDownSupporter], scala.collection.Seq[PushedBroadcastFilterData]) =
   {
     val batchScanOpt = this.child match {
       case bs: WrapsBroadcastVarPushDownSupporter
@@ -300,7 +296,8 @@ case class ColumnarToRowExec(child: SparkPlan) extends ColumnarToRowTransition w
    * This produces an [[org.apache.spark.sql.catalyst.expressions.UnsafeRow]] for each row in
    * each batch.
    */
-  def doProduceNoBroadcastVarFilterInsert(ctx: CodegenContext): String = {    // PhysicalRDD always just has one input
+  def doProduceNoBroadcastVarFilterInsert(ctx: CodegenContext): String = {
+    // PhysicalRDD always just has one input
     val input = ctx.addMutableState("scala.collection.Iterator", "input",
       v => s"$v = inputs[0];")
 

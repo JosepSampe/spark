@@ -19,9 +19,7 @@ package org.apache.spark.sql.execution.joins
 
 import java.util
 import java.util.Objects
-
 import scala.collection.mutable
-
 import org.apache.spark.sql.catalyst.TableIdentifier
 import org.apache.spark.sql.catalyst.expressions.{DynamicPruning, Expression, Literal, PlanExpression, PredicateHelper}
 import org.apache.spark.sql.catalyst.optimizer.{BuildLeft, BuildRight}
@@ -35,6 +33,8 @@ import org.apache.spark.sql.execution.aggregate.BaseAggregateExec
 import org.apache.spark.sql.execution.datasources.LogicalRelationWithTable
 import org.apache.spark.sql.execution.datasources.v2.V2TableWriteExec
 import org.apache.spark.sql.types.DataType
+
+import scala.collection.compat.toMutableMapExtensionMethods
 
 class BroadcastFilterPushdown(isSubquery: Boolean = false) extends Rule[SparkPlan]
   with PredicateHelper {

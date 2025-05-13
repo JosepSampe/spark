@@ -32,7 +32,6 @@ import org.apache.spark.sql.execution.datasources.V1WriteCommand
 import org.apache.spark.sql.execution.datasources.v2.V2CommandExec
 import org.apache.spark.sql.execution.exchange.Exchange
 import org.apache.spark.sql.execution.joins.BroadcastFilterPushdown
-
 import org.apache.spark.sql.internal.SQLConf
 
 /**
