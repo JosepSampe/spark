@@ -30,7 +30,7 @@ import org.apache.spark.sql.catalyst.trees.TreePattern
 import org.apache.spark.sql.catalyst.trees.TreePattern._
 import org.apache.spark.sql.execution.{BinaryExecNode, FilterExec, SparkPlan, WrapsBroadcastVarPushDownSupporter}
 import org.apache.spark.sql.execution.aggregate.BaseAggregateExec
-import org.apache.spark.sql.execution.datasources.LogicalRelationWithTable
+import org.apache.spark.sql.execution.datasources.LogicalRelation
 import org.apache.spark.sql.execution.datasources.v2.V2TableWriteExec
 import org.apache.spark.sql.types.DataType
 
@@ -109,8 +109,7 @@ class BroadcastFilterPushdown(isSubquery: Boolean = false) extends Rule[SparkPla
                     case e: PlanExpression[_] => e.plan.asInstanceOf[LogicalPlan]
                   })
                 val temp = subqs.flatMap(_.collectLeaves().flatMap {
-                  case LogicalRelationWithTable(_, ct) => ct.map(_.identifier)
-
+                  case lr: LogicalRelation => lr.catalogTable.map(_.identifier)
                   case _ => None
                 })
                 subqueryLeafRelationsCollected ++= temp
