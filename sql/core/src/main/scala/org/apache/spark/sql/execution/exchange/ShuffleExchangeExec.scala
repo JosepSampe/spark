@@ -84,6 +84,11 @@ trait ShuffleExchangeLike extends Exchange {
    * Returns the runtime statistics after shuffle materialization.
    */
   def runtimeStatistics: Statistics
+
+  /**
+   * The shuffle ID.
+   */
+  def shuffleId: Int
 }
 
 // Describes where the shuffle operator comes from.
@@ -199,6 +204,8 @@ case class ShuffleExchangeExec(
 
   override protected def withNewChildInternal(newChild: SparkPlan): ShuffleExchangeExec =
     copy(child = newChild)
+
+  override def shuffleId: Int = shuffleDependency.shuffleId
 }
 
 object ShuffleExchangeExec {
