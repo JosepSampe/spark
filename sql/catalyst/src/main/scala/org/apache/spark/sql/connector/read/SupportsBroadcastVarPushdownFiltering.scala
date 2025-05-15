@@ -25,7 +25,6 @@ import org.apache.spark.sql.connector.expressions.filter.Predicate
 import org.apache.spark.sql.types.StructType
 
 
-
 trait SupportsBroadcastVarPushdownFiltering {
 
   def filter(predicates: Array[Predicate]): Unit
@@ -44,7 +43,6 @@ trait SupportsBroadcastVarPushdownFiltering {
   def equalToIgnoreRuntimeFilters(other: SupportsBroadcastVarPushdownFiltering): Boolean =
     this == other
 
-
   /**
    * This method should be implemented by the DataSourceV2 Scan to return the hashCode excluding
    * the runtime filters (DPP) pushed to scan.
@@ -53,9 +51,11 @@ trait SupportsBroadcastVarPushdownFiltering {
    */
   def hashCodeIgnoreRuntimeFilters(): Int = this.hashCode
 
-  def getPushedBroadcastFilters(): util.List[PushedBroadcastFilterData] = Collections.emptyList
+  def getPushedBroadcastFilters(): util.List[PushedBroadcastFilterData] =
+    Collections.emptyList[PushedBroadcastFilterData]()
 
-  def getPushedBroadcastVarIds(): util.Set[java.lang.Long] = Collections.emptySet
+  def getPushedBroadcastVarIds(): util.Set[java.lang.Long] =
+    Collections.emptySet[java.lang.Long]()
 
   def getPushedBroadcastFiltersCount(): Int = 0
 

@@ -17,12 +17,15 @@
 
 package org.apache.spark.sql.catalyst.optimizer
 
+import scala.collection.mutable
+
 import org.apache.spark.sql.catalyst.dsl.expressions._
 import org.apache.spark.sql.catalyst.expressions.AttributeMap
 import org.apache.spark.sql.catalyst.plans.{Inner, PlanTest}
 import org.apache.spark.sql.catalyst.plans.logical.{BROADCAST, HintInfo, JoinHint, NO_BROADCAST_HASH, SHUFFLE_HASH}
 import org.apache.spark.sql.catalyst.statsEstimation.StatsTestPlan
 import org.apache.spark.sql.internal.SQLConf
+
 
 class JoinSelectionHelperSuite extends PlanTest with JoinSelectionHelper {
 
@@ -177,7 +180,7 @@ class JoinSelectionHelperSuite extends PlanTest with JoinSelectionHelper {
   }
 
   test("getSmallerSide should return BuildRight") {
-    assert(getSmallerSide(left, right) === BuildRight)
+    assert(getSmallerSide(left, right, mutable.Set.empty) === BuildRight)
   }
 
   test("canBroadcastBySize should return true if the plan size is less than 10MB") {
