@@ -16,16 +16,16 @@
  */
 package org.apache.spark.sql.execution.datasources.parquet.bcvar
 
-import java.time.Duration
 import java.util
 import java.util.Comparator
+import java.util.concurrent.TimeUnit
 
 import com.google.common.cache.{CacheBuilder, CacheLoader, LoadingCache}
 import com.google.common.collect.Sets
 import org.apache.parquet.filter2.predicate.Operators.Column
 
 import org.apache.spark.sql.catalyst.bcvar.BroadcastedJoinKeysWrapper
-import org.apache.spark.sql.execution.datasources.parquet.Converter
+import org.apache.spark.sql.execution.datasources.parquet.ConverterP
 
 object BroadcastVarCache {
 
@@ -41,7 +41,7 @@ object BroadcastVarCache {
 
   private val idempotentializer: LoadingCache[KeyIdempot, util.NavigableSet[_]] =
     CacheBuilder.newBuilder.expireAfterWrite(
-        Duration.ofSeconds(BroadcastedJoinKeysWrapper.CACHE_EXPIRY)).
+        BroadcastedJoinKeysWrapper.CACHE_EXPIRY, TimeUnit.SECONDS).
       maximumSize(BroadcastedJoinKeysWrapper.CACHE_SIZE).weakValues.build(cacheLoader)
 
   private def createNavigableSet[T](key: KeyIdempot): util.NavigableSet[T] = {
@@ -58,9 +58,9 @@ object BroadcastVarCache {
 
 
   def getNavigableSet[T <: Comparable[T]](
-                                           bcVar: BroadcastedJoinKeysWrapper,
-                                           column: Column[T],
-                                           catalystToParquetFormatConverter: Option[Converter[T]]): util.NavigableSet[T] = {
+         bcVar: BroadcastedJoinKeysWrapper,
+         column: Column[T],
+         catalystToParquetFormatConverter: Option[ConverterP[T]]): util.NavigableSet[T] = {
     val key = KeyIdempot(bcVar, column.getColumnType, catalystToParquetFormatConverter)
     idempotentializer.get(key).asInstanceOf[util.NavigableSet[T]]
   }
@@ -131,9 +131,9 @@ private object CharSeqComparator extends Comparator[CharSequence] {
 }
 
 private case class KeyIdempot (
-                                bcjk: BroadcastedJoinKeysWrapper,
-                                comparatorClass: Class[_],
-                                parquetFormatConverter: Option[Converter[_]]) {
+    bcjk: BroadcastedJoinKeysWrapper,
+    comparatorClass: Class[_],
+    parquetFormatConverter: Option[ConverterP[_]]) {
 
   override def equals(other: Any): Boolean = {
     if (other != null) {

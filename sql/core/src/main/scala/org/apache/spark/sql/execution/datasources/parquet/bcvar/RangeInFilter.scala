@@ -24,12 +24,12 @@ import org.apache.parquet.filter2.predicate.Statistics
 import org.apache.parquet.filter2.predicate.UserDefinedPredicate
 
 import org.apache.spark.sql.catalyst.bcvar.BroadcastedJoinKeysWrapper
-import org.apache.spark.sql.execution.datasources.parquet.Converter
+import org.apache.spark.sql.execution.datasources.parquet.ConverterP
 
 class RangeInFilter[T <: Comparable[T]](
-                                         private val bcVar: BroadcastedJoinKeysWrapper,
-                                         column: Column[T],
-                                         catalystToParquetFormatConverter: Option[Converter[T]] = None) extends
+     private val bcVar: BroadcastedJoinKeysWrapper,
+     column: Column[T],
+     catalystToParquetFormatConverter: Option[ConverterP[T]] = None) extends
   UserDefinedPredicate[T] with Serializable {
 
   @transient

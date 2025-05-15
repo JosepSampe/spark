@@ -925,25 +925,25 @@ object ParquetFilters {
   }
 }
 
-trait Converter[T] extends scala.Function1[Any, T] with Serializable
+trait ConverterP[T] extends scala.Function1[Any, T] with Serializable
 
-object IntegerConverter extends Converter[Integer] {
+object IntegerConverter extends ConverterP[Integer] {
   override def apply(v1: Any): Integer = ParquetFilters.toIntValue(v1)
 }
 
-object LongConverter extends Converter[JLong] {
+object LongConverter extends ConverterP[JLong] {
   override def apply(v1: Any): JLong = ParquetFilters.toLongValue(v1)
 }
 
-case class DateToDaysConverter(rebaseSpec: RebaseSpec) extends Converter[Integer] {
+case class DateToDaysConverter(rebaseSpec: RebaseSpec) extends ConverterP[Integer] {
   override def apply(v1: Any): Integer = Integer.valueOf(
     ParquetFilters.dateToDays(v1, rebaseSpec))
 }
 
-case class TimestampToMicrosConverter(rebaseSpec: RebaseSpec) extends Converter[JLong] {
+case class TimestampToMicrosConverter(rebaseSpec: RebaseSpec) extends ConverterP[JLong] {
   override def apply(v1: Any): JLong = ParquetFilters.timestampToMicros(v1, rebaseSpec)
 }
 
-case class TimestampToMillisConverter(rebaseSpec: RebaseSpec) extends Converter[JLong] {
+case class TimestampToMillisConverter(rebaseSpec: RebaseSpec) extends ConverterP[JLong] {
   override def apply(v1: Any): JLong = ParquetFilters.timestampToMillis(v1, rebaseSpec)
 }

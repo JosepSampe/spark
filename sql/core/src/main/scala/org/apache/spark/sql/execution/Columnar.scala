@@ -258,7 +258,7 @@ case class ColumnarToRowExec(child: SparkPlan) extends ColumnarToRowTransition w
         allPushedBCvar.filterNot(pd => partitionColNames.contains(pd.columnName))
       })
       .getOrElse(Seq.empty)
-    (batchScanOpt, pushedBroadcastFilters.toSeq)
+    (batchScanOpt, pushedBroadcastFilters)
   }
 
   /**

@@ -906,10 +906,18 @@ case class BroadcastVarFilterCollector(override val readSchema: StructType,
     }).toList.asJava
   }
 
-  override def getPushedBroadcastVarIds(): util.Set[java.lang.Long] =
-    this.getPushedBroadcastFilters().stream().map(bcData =>
-      java.lang.Long.valueOf(bcData.bcVar.getBroadcastVarId)).collect(
-      util.stream.Collectors.toSet[java.lang.Long])
+//  override def getPushedBroadcastVarIds(): util.Set[java.lang.Long] =
+//    this.getPushedBroadcastFilters().stream().map(bcData =>
+//      java.lang.Long.valueOf(bcData.bcVar.getBroadcastVarId)).collect(
+//      util.stream.Collectors.toSet[java.lang.Long])
+
+  override def getPushedBroadcastVarIds(): util.Set[java.lang.Long] = {
+    val collector = util.stream.Collectors.toSet[java.lang.Long]()
+    this.getPushedBroadcastFilters().stream()
+      .map((bcData: PushedBroadcastFilterData) =>
+        java.lang.Long.valueOf(bcData.bcVar.getBroadcastVarId): java.lang.Long)
+      .collect(collector)
+  }
 
   override def getPushedBroadcastFiltersCount(): Int = this.broadcastVarFilterExpressions.size
 
