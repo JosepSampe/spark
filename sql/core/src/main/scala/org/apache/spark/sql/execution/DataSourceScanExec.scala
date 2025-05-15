@@ -21,6 +21,7 @@ import java.util
 import java.util.concurrent.TimeUnit._
 
 import scala.collection.mutable
+import scala.jdk.CollectionConverters._
 
 import com.google.common.base.Objects
 import org.apache.commons.lang3.StringUtils
@@ -531,12 +532,20 @@ case class FileSourceScanExec(
     @transient proxyForPushedBroadcastVar: Option[Seq[ProxyBroadcastVarAndStageIdentifier]] = None)
   extends FileSourceScanLike with WrapsBroadcastVarPushDownSupporter {
 
-  override def hashCode(): Int = Objects.hashCode(this.relation,
-    this.stream, this.output, this.partitionFilters, this.optionalBucketSet,
-    this.optionalNumCoalescedBuckets, this.dataFilters, this.disableBucketedScan,
+  override def hashCode(): Int = Objects.hashCode(
+    this.relation,
+    this.stream,
+    this.output,
+    this.partitionFilters,
+    this.optionalBucketSet,
+    this.optionalNumCoalescedBuckets,
+    this.dataFilters,
+    java.lang.Boolean.valueOf(this.disableBucketedScan),
     this.proxyForPushedBroadcastVar,
-    this.broadcastVarCollector.map(_.hashCodeIgnoreRuntimeFilters()).getOrElse(-1))
-
+    java.lang.Integer.valueOf(
+      this.broadcastVarCollector.map(_.hashCodeIgnoreRuntimeFilters()).getOrElse(-1)
+    )
+  )
 
   override def equals(other: Any): Boolean = other match {
     case fs: FileSourceScanExec if fs ne this =>
@@ -894,8 +903,12 @@ case class BroadcastVarFilterCollector(override val readSchema: StructType,
    *
    * @return int
    */
-  override def hashCodeIgnoreRuntimeFilters(): Int = Objects.hashCode(getClass.hashCode(),
-    this.partitionAttribs.toSeq, this.readSchema)
+  override def hashCodeIgnoreRuntimeFilters(): Int =
+    Objects.hashCode(
+      Int.box(getClass.hashCode()),
+      this.partitionAttribs.toSeq,
+      this.readSchema
+    )
 
   override def getPushedBroadcastFilters(): util.List[PushedBroadcastFilterData] = {
     import scala.jdk.CollectionConverters._
@@ -906,18 +919,11 @@ case class BroadcastVarFilterCollector(override val readSchema: StructType,
     }).toList.asJava
   }
 
-//  override def getPushedBroadcastVarIds(): util.Set[java.lang.Long] =
-//    this.getPushedBroadcastFilters().stream().map(bcData =>
-//      java.lang.Long.valueOf(bcData.bcVar.getBroadcastVarId)).collect(
-//      util.stream.Collectors.toSet[java.lang.Long])
-
-  override def getPushedBroadcastVarIds(): util.Set[java.lang.Long] = {
-    val collector = util.stream.Collectors.toSet[java.lang.Long]()
-    this.getPushedBroadcastFilters().stream()
-      .map((bcData: PushedBroadcastFilterData) =>
-        java.lang.Long.valueOf(bcData.bcVar.getBroadcastVarId): java.lang.Long)
-      .collect(collector)
-  }
+  override def getPushedBroadcastVarIds(): util.Set[java.lang.Long] =
+    this.getPushedBroadcastFilters().asScala
+      .map(bcData => java.lang.Long.valueOf(bcData.bcVar.getBroadcastVarId))
+      .toSet
+      .asJava
 
   override def getPushedBroadcastFiltersCount(): Int = this.broadcastVarFilterExpressions.size
 
