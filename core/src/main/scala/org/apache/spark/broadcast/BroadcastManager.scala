@@ -18,6 +18,7 @@
 package org.apache.spark.broadcast
 
 import java.util.Collections
+import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.atomic.AtomicLong
 
 import scala.reflect.ClassTag
@@ -32,6 +33,7 @@ import org.apache.spark.internal.Logging
 private[spark] class BroadcastManager(
     val isDriver: Boolean, conf: SparkConf) extends Logging {
 
+  private val broadcastLifeCycleListeners = new CopyOnWriteArraySet[BroadcastLifeCycleListener]()
   private var initialized = false
   private var broadcastFactory: BroadcastFactory = null
 
@@ -49,6 +51,8 @@ private[spark] class BroadcastManager(
   }
 
   def stop(): Unit = {
+    this.broadcastLifeCycleListeners.forEach(_.onBroadcastManagerStop())
+    this.broadcastLifeCycleListeners.clear()
     broadcastFactory.stop()
   }
 
@@ -81,4 +85,11 @@ private[spark] class BroadcastManager(
   def unbroadcast(id: Long, removeFromDriver: Boolean, blocking: Boolean): Unit = {
     broadcastFactory.unbroadcast(id, removeFromDriver, blocking)
   }
+
+  def registerBroadcastLifeCycleListener(listener: BroadcastLifeCycleListener): Unit = {
+    broadcastLifeCycleListeners.add(listener)
+  }
+
+  def invokeBroadcastLifeCycleListeners(destroyedBroadcast: Long): Unit =
+    this.broadcastLifeCycleListeners.forEach(_.onDestroy(destroyedBroadcast))
 }
