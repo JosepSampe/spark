@@ -43,6 +43,7 @@ import org.apache.spark.sql.execution.bucketing.{CoalesceBucketsInJoin, DisableU
 import org.apache.spark.sql.execution.dynamicpruning.PlanDynamicPruningFilters
 import org.apache.spark.sql.execution.exchange.EnsureRequirements
 import org.apache.spark.sql.execution.reuse.ReuseExchangeAndSubquery
+import org.apache.spark.sql.execution.joins.BroadcastFilterPushdown
 import org.apache.spark.sql.execution.streaming.{IncrementalExecution, OffsetSeqMetadata, WatermarkPropagator}
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.streaming.OutputMode
@@ -493,6 +494,7 @@ object QueryExecution {
     adaptiveExecutionRule.toSeq ++
     Seq(
       CoalesceBucketsInJoin,
+      new BroadcastFilterPushdown(subquery),
       PlanDynamicPruningFilters(sparkSession),
       PlanSubqueries(sparkSession),
       RemoveRedundantProjects,

@@ -36,8 +36,10 @@ import org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName
 import org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName._
 import org.apache.parquet.schema.Type.Repetition
 
+import org.apache.spark.sql.catalyst.bcvar.BroadcastedJoinKeysWrapper
 import org.apache.spark.sql.catalyst.util.{CaseInsensitiveMap, DateTimeUtils, IntervalUtils}
 import org.apache.spark.sql.catalyst.util.RebaseDateTime.{rebaseGregorianToJulianDays, rebaseGregorianToJulianMicros, RebaseSpec}
+import org.apache.spark.sql.execution.datasources.parquet.bcvar.RangeInFilter
 import org.apache.spark.sql.internal.LegacyBehaviorPolicy
 import org.apache.spark.sql.sources
 import org.apache.spark.unsafe.types.UTF8String
@@ -150,28 +152,11 @@ class ParquetFilters(
   private val ParquetTimestampMillisType =
     ParquetSchemaType(LogicalTypeAnnotation.timestampType(true, TimeUnit.MILLIS), INT64, 0)
 
-  private def dateToDays(date: Any): Int = {
-    val gregorianDays = date match {
-      case d: Date => DateTimeUtils.fromJavaDate(d)
-      case ld: LocalDate => DateTimeUtils.localDateToDays(ld)
-    }
-    datetimeRebaseSpec.mode match {
-      case LegacyBehaviorPolicy.LEGACY => rebaseGregorianToJulianDays(gregorianDays)
-      case _ => gregorianDays
-    }
-  }
-
-  private def timestampToMicros(v: Any): JLong = {
-    val gregorianMicros = v match {
-      case i: Instant => DateTimeUtils.instantToMicros(i)
-      case t: Timestamp => DateTimeUtils.fromJavaTimestamp(t)
-    }
-    datetimeRebaseSpec.mode match {
-      case LegacyBehaviorPolicy.LEGACY =>
-        rebaseGregorianToJulianMicros(datetimeRebaseSpec.timeZone, gregorianMicros)
-      case _ => gregorianMicros
-    }
-  }
+  private def dateToDays(date: Any): Int = ParquetFilters.dateToDays(date, datetimeRebaseSpec)
+  private def timestampToMicros(v: Any): JLong = ParquetFilters.timestampToMicros(v,
+    datetimeRebaseSpec)
+  private def timestampToMillis(v: Any): JLong = ParquetFilters.timestampToMillis(v,
+    datetimeRebaseSpec)
 
   private def decimalToInt32(decimal: JBigDecimal): Integer = decimal.unscaledValue().intValue()
 
@@ -192,23 +177,9 @@ class ParquetFilters(
     Binary.fromConstantByteArray(fixedLengthBytes, 0, numBytes)
   }
 
-  private def timestampToMillis(v: Any): JLong = {
-    val micros = timestampToMicros(v)
-    val millis = DateTimeUtils.microsToMillis(micros)
-    millis.asInstanceOf[JLong]
-  }
+  private def toIntValue(v: Any): Integer = ParquetFilters.toIntValue(v)
 
-  private def toIntValue(v: Any): Integer = {
-    Option(v).map {
-      case p: Period => IntervalUtils.periodToMonths(p)
-      case n => n.asInstanceOf[Number].intValue
-    }.map(_.asInstanceOf[Integer]).orNull
-  }
-
-  private def toLongValue(v: Any): JLong = v match {
-    case d: Duration => IntervalUtils.durationToMicros(d)
-    case l => l.asInstanceOf[JLong]
-  }
+  private def toLongValue(v: Any): JLong = ParquetFilters.toLongValue(v)
 
   private val makeEq:
     PartialFunction[ParquetSchemaType, (Array[String], Any) => FilterPredicate] = {
@@ -560,6 +531,65 @@ class ParquetFilters(
         FilterApi.in(binaryColumn(n), set)
   }
 
+  private val makeRangeInPredicate:
+    PartialFunction[ParquetSchemaType, (Array[String], BroadcastedJoinKeysWrapper) =>
+      FilterPredicate] = {
+
+    case ParquetByteType | ParquetShortType | ParquetIntegerType =>
+      (n: Array[String], value: BroadcastedJoinKeysWrapper) => {
+        val column = intColumn(n)
+        val pred = new RangeInFilter[Integer](value, column, Some(IntegerConverter))
+        FilterApi.userDefined(column, pred)
+      }
+
+
+    case ParquetLongType =>
+      (n: Array[String], value: BroadcastedJoinKeysWrapper) =>
+        val column = longColumn(n)
+        val pred = new RangeInFilter[JLong](value, column, Some(LongConverter))
+        FilterApi.userDefined(column, pred)
+
+    case ParquetFloatType =>
+      (n: Array[String], value: BroadcastedJoinKeysWrapper) =>
+        val column = floatColumn(n)
+        val pred = new RangeInFilter[JFloat](value, column)
+        FilterApi.userDefined(column, pred)
+
+    case ParquetDoubleType =>
+      (n: Array[String], value: BroadcastedJoinKeysWrapper) =>
+        val column = doubleColumn(n)
+        val pred = new RangeInFilter[JDouble](value, column)
+        FilterApi.userDefined(column, pred)
+
+    case ParquetStringType =>
+      // TODO: Asif: handle this as parquet might be rerturning data as binary
+      (n: Array[String], value: BroadcastedJoinKeysWrapper) =>
+        val column = stringColumn(n)
+        val pred = new RangeInFilter[String](value, column)
+        FilterApi.userDefined(column, pred)
+
+    case ParquetDateType =>
+      (n: Array[String], value: BroadcastedJoinKeysWrapper) =>
+        val column = intColumn(n)
+        val pred = new RangeInFilter[Integer](value, column,
+          Some(DateToDaysConverter(rebaseSpec = datetimeRebaseSpec)))
+        FilterApi.userDefined(column, pred)
+
+    case ParquetTimestampMicrosType =>
+      (n: Array[String], value: BroadcastedJoinKeysWrapper) =>
+        val column = longColumn(n)
+        val pred = new RangeInFilter[JLong](value, column,
+          Some(TimestampToMicrosConverter(datetimeRebaseSpec)))
+        FilterApi.userDefined(column, pred)
+
+    case ParquetTimestampMillisType =>
+      (n: Array[String], value: BroadcastedJoinKeysWrapper) =>
+        val column = longColumn(n)
+        val pred = new RangeInFilter[JLong](value, column,
+          Some(TimestampToMillisConverter(datetimeRebaseSpec)))
+        FilterApi.userDefined(column, pred)
+  }
+
   // Returns filters that can be pushed down when reading Parquet files.
   def convertibleFilters(filters: Seq[sources.Filter]): Seq[sources.Filter] = {
     filters.flatMap(convertibleFiltersHelper(_, canPartialPushDown = true))
@@ -649,9 +679,12 @@ class ParquetFilters(
     case _ => false
   }
 
-  private def canMakeFilterOn(name: String, value: Any): Boolean = {
-    nameToParquetField.contains(name) && valueCanMakeFilterOn(name, value)
-  }
+  private def canMakeFilterOn(name: String, value: Any): Boolean =
+    value match {
+      case _: BroadcastedJoinKeysWrapper => true
+
+      case _ => nameToParquetField.contains(name) && valueCanMakeFilterOn(name, value)
+    }
 
   /**
    * @param predicate the input filter predicates. Not all the predicates can be pushed down.
@@ -765,20 +798,26 @@ class ParquetFilters(
           canMakeFilterOn(name, values.head) =>
         val fieldType = nameToParquetField(name).fieldType
         val fieldNames = nameToParquetField(name).fieldNames
-        if (values.length <= pushDownInFilterThreshold) {
-          values.distinct.flatMap { v =>
-            makeEq.lift(fieldType).map(_(fieldNames, v))
-          }.reduceLeftOption(FilterApi.or)
-        } else if (canPartialPushDownConjuncts) {
-          if (values.contains(null)) {
-            Seq(makeEq.lift(fieldType).map(_(fieldNames, null)),
-              makeInPredicate.lift(fieldType).map(_(fieldNames, values.filter(_ != null)))
-            ).flatten.reduceLeftOption(FilterApi.or)
-          } else {
-            makeInPredicate.lift(fieldType).map(_(fieldNames, values))
-          }
+        val isBroadcastVar = values.headOption.exists(_.isInstanceOf[BroadcastedJoinKeysWrapper])
+        if (isBroadcastVar) {
+          val bcVar = values.head.asInstanceOf[BroadcastedJoinKeysWrapper]
+          makeRangeInPredicate.lift(fieldType).map(_ (fieldNames, bcVar))
         } else {
-          None
+          if (values.length <= pushDownInFilterThreshold) {
+            values.distinct.flatMap { v =>
+              makeEq.lift(fieldType).map(_ (fieldNames, v))
+            }.reduceLeftOption(FilterApi.or)
+          } else if (canPartialPushDownConjuncts) {
+            if (values.contains(null)) {
+              Seq(makeEq.lift(fieldType).map(_ (fieldNames, null)),
+                makeInPredicate.lift(fieldType).map(_ (fieldNames, values.filter(_ != null)))
+              ).flatten.reduceLeftOption(FilterApi.or)
+            } else {
+              makeInPredicate.lift(fieldType).map(_ (fieldNames, values))
+            }
+          } else {
+            None
+          }
         }
 
       case sources.StringStartsWith(name, prefix)
@@ -846,4 +885,71 @@ class ParquetFilters(
       case _ => None
     }
   }
+}
+
+object ParquetFilters {
+  def toIntValue(v: Any): Integer = {
+    Option(v).map {
+      case p: Period => IntervalUtils.periodToMonths(p)
+      case n => n.asInstanceOf[Number].intValue
+    }.map(_.asInstanceOf[Integer]).orNull
+  }
+
+  def toLongValue(v: Any): JLong = v match {
+    case d: Duration => IntervalUtils.durationToMicros(d)
+    case lt: LocalTime => DateTimeUtils.localTimeToMicros(lt)
+    case l => l.asInstanceOf[JLong]
+  }
+
+  def dateToDays(date: Any, datetimeRebaseSpec: RebaseSpec): Int = {
+    val gregorianDays = date match {
+      case d: Date => DateTimeUtils.fromJavaDate(d)
+      case ld: LocalDate => DateTimeUtils.localDateToDays(ld)
+    }
+    datetimeRebaseSpec.mode match {
+      case LegacyBehaviorPolicy.LEGACY => rebaseGregorianToJulianDays(gregorianDays)
+      case _ => gregorianDays
+    }
+  }
+
+  def timestampToMicros(v: Any, datetimeRebaseSpec: RebaseSpec): JLong = {
+    val gregorianMicros = v match {
+      case i: Instant => DateTimeUtils.instantToMicros(i)
+      case t: Timestamp => DateTimeUtils.fromJavaTimestamp(t)
+    }
+    datetimeRebaseSpec.mode match {
+      case LegacyBehaviorPolicy.LEGACY =>
+        rebaseGregorianToJulianMicros(datetimeRebaseSpec.timeZone, gregorianMicros)
+      case _ => gregorianMicros
+    }
+  }
+
+  def timestampToMillis(v: Any, datetimeRebaseSpec: RebaseSpec): JLong = {
+    val micros = timestampToMicros(v, datetimeRebaseSpec)
+    val millis = DateTimeUtils.microsToMillis(micros)
+    millis.asInstanceOf[JLong]
+  }
+}
+
+trait Converter[T] extends scala.Function1[Any, T] with Serializable
+
+object IntegerConverter extends Converter[Integer] {
+  override def apply(v1: Any): Integer = ParquetFilters.toIntValue(v1)
+}
+
+object LongConverter extends Converter[JLong] {
+  override def apply(v1: Any): JLong = ParquetFilters.toLongValue(v1)
+}
+
+case class DateToDaysConverter(rebaseSpec: RebaseSpec) extends Converter[Integer] {
+  override def apply(v1: Any): Integer = Integer.valueOf(
+    ParquetFilters.dateToDays(v1, rebaseSpec))
+}
+
+case class TimestampToMicrosConverter(rebaseSpec: RebaseSpec) extends Converter[JLong] {
+  override def apply(v1: Any): JLong = ParquetFilters.timestampToMicros(v1, rebaseSpec)
+}
+
+case class TimestampToMillisConverter(rebaseSpec: RebaseSpec) extends Converter[JLong] {
+  override def apply(v1: Any): JLong = ParquetFilters.timestampToMillis(v1, rebaseSpec)
 }

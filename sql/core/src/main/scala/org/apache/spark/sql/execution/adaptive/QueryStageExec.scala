@@ -41,10 +41,16 @@ import org.apache.spark.sql.vectorized.ColumnarBatch
  */
 abstract class QueryStageExec extends LeafExecNode {
 
+  // This flag should be relied to identify whether the Join is a "SELf_PUSH" only if it
+  // the exchange is original ( i.e not reused) else it can give false positive.
+  val hasStreamSidePushdownDependent = false
+
   /**
    * An id of this query stage which is unique in the entire query plan.
    */
   val id: Int
+
+  val reuseSource: Option[Int]
 
   /**
    * The sub-tree of the query plan that belongs to this query stage.
@@ -170,7 +176,10 @@ abstract class ExchangeQueryStageExec extends QueryStageExec {
 
   override def doCanonicalize(): SparkPlan = _canonicalized
 
-  def newReuseInstance(newStageId: Int, newOutput: Seq[Attribute]): ExchangeQueryStageExec
+  def newReuseInstance(
+        newStageId: Int,
+        newOutput: Seq[Attribute],
+        hasStreamSidePushdownDependent: Boolean): ExchangeQueryStageExec
 }
 
 /**
@@ -183,7 +192,8 @@ abstract class ExchangeQueryStageExec extends QueryStageExec {
 case class ShuffleQueryStageExec(
     override val id: Int,
     override val plan: SparkPlan,
-    override val _canonicalized: SparkPlan) extends ExchangeQueryStageExec {
+    override val _canonicalized: SparkPlan,
+    override val reuseSource: Option[Int] = None) extends ExchangeQueryStageExec {
 
   @transient val shuffle = plan match {
     case s: ShuffleExchangeLike => s
@@ -197,11 +207,13 @@ case class ShuffleQueryStageExec(
   override protected def doMaterialize(): Future[Any] = shuffle.submitShuffleJob()
 
   override def newReuseInstance(
-      newStageId: Int, newOutput: Seq[Attribute]): ExchangeQueryStageExec = {
+         newStageId: Int,
+         newOutput: Seq[Attribute],
+         hasStreamSidePushdownDependent: Boolean): ExchangeQueryStageExec = {
     val reuse = ShuffleQueryStageExec(
       newStageId,
       ReusedExchangeExec(newOutput, shuffle),
-      _canonicalized)
+      _canonicalized, Option(this.id))
     reuse._resultOption = this._resultOption
     reuse
   }
@@ -231,7 +243,9 @@ case class ShuffleQueryStageExec(
 case class BroadcastQueryStageExec(
     override val id: Int,
     override val plan: SparkPlan,
-    override val _canonicalized: SparkPlan) extends ExchangeQueryStageExec {
+    override val _canonicalized: SparkPlan,
+    override val reuseSource: Option[Int] = None,
+    override val hasStreamSidePushdownDependent: Boolean = false) extends ExchangeQueryStageExec {
 
   @transient val broadcast = plan match {
     case b: BroadcastExchangeLike => b
@@ -243,11 +257,15 @@ case class BroadcastQueryStageExec(
   override protected def doMaterialize(): Future[Any] = broadcast.submitBroadcastJob()
 
   override def newReuseInstance(
-      newStageId: Int, newOutput: Seq[Attribute]): ExchangeQueryStageExec = {
+       newStageId: Int,
+       newOutput: Seq[Attribute],
+       hasStreamSidePushdownDependent: Boolean): ExchangeQueryStageExec = {
     val reuse = BroadcastQueryStageExec(
       newStageId,
       ReusedExchangeExec(newOutput, broadcast),
-      _canonicalized)
+      _canonicalized,
+      Option(this.id),
+      hasStreamSidePushdownDependent = hasStreamSidePushdownDependent)
     reuse._resultOption = this._resultOption
     reuse
   }
@@ -267,6 +285,8 @@ case class BroadcastQueryStageExec(
 case class TableCacheQueryStageExec(
     override val id: Int,
     override val plan: SparkPlan) extends QueryStageExec {
+
+  val reuseSource: Option[Int] = None
 
   @transient val inMemoryTableScan = plan match {
     case i: InMemoryTableScanLike => i
@@ -293,4 +313,44 @@ case class TableCacheQueryStageExec(
   override protected def doMaterialize(): Future[Any] = future
 
   override def getRuntimeStatistics: Statistics = inMemoryTableScan.runtimeStatistics
+}
+
+case class ResultQueryStageExec(
+       override val id: Int,
+       override val plan: SparkPlan,
+       resultHandler: SparkPlan => Any) extends QueryStageExec {
+  val reuseSource: Option[Int] = None
+  override def resetMetrics(): Unit = {
+    plan.resetMetrics()
+  }
+
+  override protected def doMaterialize(): Future[Any] = {
+    val javaFuture = SQLExecution.withThreadLocalCaptured(
+      session,
+      ResultQueryStageExec.executionContext) {
+      resultHandler(plan)
+    }
+    val scalaPromise: Promise[Any] = Promise()
+    javaFuture.whenComplete { (result: Any, exception: Throwable) =>
+      if (exception != null) {
+        scalaPromise.failure(exception match {
+          case completionException: java.util.concurrent.CompletionException =>
+            completionException.getCause
+          case ex => ex
+        })
+      } else {
+        scalaPromise.success(result)
+      }
+    }
+    scalaPromise.future
+  }
+
+  // Result stage could be any SparkPlan, so we don't have a specific runtime statistics for it.
+  override def getRuntimeStatistics: Statistics = Statistics.DUMMY
+}
+
+object ResultQueryStageExec {
+  private[execution] val executionContext = ExecutionContext.fromExecutorService(
+    ThreadUtils.newDaemonCachedThreadPool("ResultQueryStageExecution",
+      SQLConf.get.getConf(StaticSQLConf.RESULT_QUERY_STAGE_MAX_THREAD_THRESHOLD)))
 }
