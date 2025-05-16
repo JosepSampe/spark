@@ -331,39 +331,27 @@ case class TableCacheQueryStageExec(
 }
 
 case class ResultQueryStageExec(
-     override val id: Int,
-     override val plan: SparkPlan,
-     resultHandler: SparkPlan => Any) extends QueryStageExec {
-
+         override val id: Int,
+         override val plan: SparkPlan,
+         resultHandler: SparkPlan => Any) extends QueryStageExec {
+  val reuseSource: Option[Int] = None
   override def resetMetrics(): Unit = {
     plan.resetMetrics()
   }
 
-  override val reuseSource: Option[Int] = None
-
   override protected def doMaterialize(): Future[Any] = {
-
-    val scalaPromise: Promise[Any] = Promise()
-
-    val scalaFuture = SQLExecution.withThreadLocalCaptured(
+    val javaFuture = SQLExecution.withThreadLocalCaptured(
       session,
       ResultQueryStageExec.executionContext) {
       resultHandler(plan)
-    }.asInstanceOf[Future[Any]]
-
-    scalaFuture.onComplete {
-      case Success(result) =>
-        scalaPromise.success(result)
-      case Failure(exception) =>
-        scalaPromise.failure(exception)
+    }
+    Future {
+      javaFuture.get()
     }(ResultQueryStageExec.executionContext)
-
-    scalaPromise.future
   }
 
   // Result stage could be any SparkPlan, so we don't have a specific runtime statistics for it.
   override def getRuntimeStatistics: Statistics = Statistics.DUMMY
-
 }
 
 object ResultQueryStageExec {
