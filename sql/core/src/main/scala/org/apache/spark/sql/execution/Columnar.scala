@@ -301,7 +301,7 @@ case class ColumnarToRowExec(child: SparkPlan) extends ColumnarToRowTransition w
    * This produces an [[org.apache.spark.sql.catalyst.expressions.UnsafeRow]] for each row in
    * each batch.
    */
-  def doProduceNoBroadcastVarFilterInsert
+  def doProduceNoBroadcastVarFilterInsert(ctx: CodegenContext): String = {
     // PhysicalRDD always just has one input
     val input = ctx.addMutableState("scala.collection.Iterator", "input",
       v => s"$v = inputs[0];")

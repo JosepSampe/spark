@@ -152,56 +152,6 @@ case class DataSourceV2ScanRelation(
     keyGroupedPartitioning: Option[Seq[Expression]] = None,
     ordering: Option[Seq[SortOrder]] = None) extends LeafNode with NamedRelation {
 
-  override def name: String = relation.name
-
-  override def simpleString(maxFields: Int): String = {
-    s"RelationV2${truncatedString(output, "[", ", ", "]", maxFields)} $name"
-  }
-
-  override def computeStats(): Statistics = {
-    scan match {
-      case r: SupportsReportStatistics =>
-        val statistics = r.estimateStatistics()
-        DataSourceV2Relation.transformV2Stats(statistics, None, conf.defaultSizeInBytes, output)
-      case _ =>
-        Statistics(sizeInBytes = conf.defaultSizeInBytes)
-    }
-  }
-}
-
-/**
- * A specialization of [[DataSourceV2RelationBase]] that supports streaming scan.
- * It will be transformed to [[StreamingDataSourceV2ScanRelation]] during the planning phase of
- * [[MicrobatchExecution]].
- */
-case class StreamingDataSourceV2Relation(
-    table: Table,
-    override val output: Seq[AttributeReference],
-    catalog: Option[CatalogPlugin],
-    identifier: Option[Identifier],
-    options: CaseInsensitiveStringMap,
-    metadataPath: String)
-  extends DataSourceV2RelationBase(table, output, catalog, identifier, options) {
-
-  override def isStreaming: Boolean = true
-
-  override def newInstance(): StreamingDataSourceV2Relation = {
-    copy(output = output.map(_.newInstance()))
-  }
-}
-/**
- * A specialization of [[DataSourceV2ScanRelation]] with the streaming bit set to true, as well
- * as start and end offsets for Microbatch processing.
- */
-case class StreamingDataSourceV2ScanRelation(
-    relation: StreamingDataSourceV2Relation,
-    scan: Scan,
-    output: Seq[AttributeReference],
-    stream: SparkDataStream,
-    startOffset: Option[Offset] = None,
-    endOffset: Option[Offset] = None)
-  extends LeafNode with MultiInstanceRelation with NamedRelation  {
-
   // because in case of proxy broadcast var push, the build leg plan in a cached stage
   // would already have materialized the stage so the runtime vars may have been pushed to
   // the Scan instance. While the lookup physical plan will have a buildleg whose leaf relation's
@@ -251,6 +201,56 @@ case class StreamingDataSourceV2ScanRelation(
       relation = relation.canonicalized.asInstanceOf[DataSourceV2Relation],
       ordering = ordering.map(_.map(QueryPlan.normalizeExpressions(_, output)))
     )
+
+  override def name: String = relation.name
+
+  override def simpleString(maxFields: Int): String = {
+    s"RelationV2${truncatedString(output, "[", ", ", "]", maxFields)} $name"
+  }
+
+  override def computeStats(): Statistics = {
+    scan match {
+      case r: SupportsReportStatistics =>
+        val statistics = r.estimateStatistics()
+        DataSourceV2Relation.transformV2Stats(statistics, None, conf.defaultSizeInBytes, output)
+      case _ =>
+        Statistics(sizeInBytes = conf.defaultSizeInBytes)
+    }
+  }
+}
+
+/**
+ * A specialization of [[DataSourceV2RelationBase]] that supports streaming scan.
+ * It will be transformed to [[StreamingDataSourceV2ScanRelation]] during the planning phase of
+ * [[MicrobatchExecution]].
+ */
+case class StreamingDataSourceV2Relation(
+    table: Table,
+    override val output: Seq[AttributeReference],
+    catalog: Option[CatalogPlugin],
+    identifier: Option[Identifier],
+    options: CaseInsensitiveStringMap,
+    metadataPath: String)
+  extends DataSourceV2RelationBase(table, output, catalog, identifier, options) {
+
+  override def isStreaming: Boolean = true
+
+  override def newInstance(): StreamingDataSourceV2Relation = {
+    copy(output = output.map(_.newInstance()))
+  }
+}
+/**
+ * A specialization of [[DataSourceV2ScanRelation]] with the streaming bit set to true, as well
+ * as start and end offsets for Microbatch processing.
+ */
+case class StreamingDataSourceV2ScanRelation(
+    relation: StreamingDataSourceV2Relation,
+    scan: Scan,
+    output: Seq[AttributeReference],
+    stream: SparkDataStream,
+    startOffset: Option[Offset] = None,
+    endOffset: Option[Offset] = None)
+  extends LeafNode with MultiInstanceRelation with NamedRelation  {
 
   val (catalog, identifier) = (relation.catalog, relation.identifier)
 

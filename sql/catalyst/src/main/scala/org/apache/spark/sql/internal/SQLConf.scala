@@ -6100,6 +6100,26 @@ class SQLConf extends Serializable with Logging with SqlApiConf {
   def coalesceBucketsInJoinMaxBucketRatio: Int =
     getConf(SQLConf.COALESCE_BUCKETS_IN_JOIN_MAX_BUCKET_RATIO)
 
+  def preferAsBuildSideLegAlreadyBroadcasted: Boolean =
+    getConf(PREFER_AS_BUILDSIDE_LEG_ALREADY_BROADCASTED)
+
+  def useAggsNonTrivialFiltersToSelectBHJStrategy: Boolean =
+    getConf(USE_AGGS_NONTRIVIAL_FILTERS_TO_SELECT_BHJ_STRATEGY)
+
+  def considerPushedBroadcastvarOnBatchscanAsPrunablity: Boolean =
+    getConf(CONSIDER_PUSHED_BROADCASTVAR_ON_BATCHSCAN_AS_PRUNABLITY)
+
+  def pushBroadcastedJoinKeysASFilterToScan: Boolean =
+    getConf(PUSH_BROADCASTED_JOIN_KEYS_AS_FILTER_TO_SCAN)
+
+  def useBroadcastAsFilterOnSubqueries: Boolean =
+    getConf(USE_BROADCASTVAR_AS_FILTER_ON_SUBQUERIES)
+
+  def preferReuseExchangeOverBroadcastVarPushdown: Boolean =
+    getConf(PREFER_REUSE_EXCHANGE_OVER_BROADCAST_VAR_PUSHDOWN)
+
+  def preferBroadcastVarPushdownOverDPP: Boolean = getConf(PREFER_BROADCAST_VAR_PUSHDOWN_OVER_DPP)
+
   def optimizeNullAwareAntiJoin: Boolean =
     getConf(SQLConf.OPTIMIZE_NULL_AWARE_ANTI_JOIN)
 

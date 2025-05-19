@@ -564,7 +564,7 @@ object Join {
         leftOutput :+ j.exists
       case LeftExistence(_) =>
         leftOutput
-      case LeftOuter | LeftSingle =>
+      case LeftOuter =>
         leftOutput ++ rightOutput.map(_.withNullability(true))
       case RightOuter =>
         leftOutput.map(_.withNullability(true)) ++ rightOutput
