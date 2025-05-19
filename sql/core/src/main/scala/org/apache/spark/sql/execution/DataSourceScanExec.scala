@@ -28,8 +28,8 @@ import org.apache.hadoop.fs.Path
 
 import org.apache.spark.internal.LogKeys.{COUNT, MAX_SPLIT_BYTES, OPEN_COST_IN_BYTES}
 import org.apache.spark.internal.MDC
-import org.apache.spark.sql.{execution, sources}
 import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.{execution, sources}
 import org.apache.spark.sql.catalyst.{FileSourceOptions, InternalRow, TableIdentifier}
 import org.apache.spark.sql.catalyst.bcvar.BroadcastedJoinKeysWrapper
 import org.apache.spark.sql.catalyst.catalog.BucketSpec
@@ -40,8 +40,8 @@ import org.apache.spark.sql.catalyst.util.{truncatedString, CaseInsensitiveMap}
 import org.apache.spark.sql.connector.expressions.{FieldReference, NamedReference}
 import org.apache.spark.sql.connector.expressions.filter.{Predicate => ConnectorPredicate}
 import org.apache.spark.sql.connector.read.{PushedBroadcastFilterData, SupportsBroadcastVarPushdownFiltering}
+import org.apache.spark.sql.connector.read.streaming.SparkDataStream
 import org.apache.spark.sql.errors.QueryExecutionErrors
-import org.apache.spark.sql.execution
 import org.apache.spark.sql.execution.datasources._
 import org.apache.spark.sql.execution.datasources.parquet.{ParquetFileFormat => ParquetSource}
 import org.apache.spark.sql.execution.datasources.parquet.bcvar.ParquetFilterConverterUtils
@@ -612,6 +612,7 @@ trait FileSourceScanLike extends DataSourceScanExec {
 case class FileSourceScanExec(
     @transient override val relation: HadoopFsRelation,
     @transient broadcastVarCollector: Option[BroadcastVarFilterCollector],
+    @transient stream: Option[SparkDataStream],
     override val output: Seq[Attribute],
     override val requiredSchema: StructType,
     override val partitionFilters: Seq[Expression],
@@ -932,6 +933,9 @@ case class FileSourceScanExec(
     FileSourceScanExec(
       relation,
       nullSafebcCollector,
+      // remove stream on canonicalization; this is needed for reused shuffle to be effective in
+      // self-join
+      None,
       output.map(QueryPlan.normalizeExpressions(_, output)),
       requiredSchema,
       QueryPlan.normalizePredicates(
@@ -946,7 +950,7 @@ case class FileSourceScanExec(
 }
 
 case class BroadcastVarFilterCollector(override val readSchema: StructType,
-                                       partitionAttribs: Array[NamedReference]) extends SupportsBroadcastVarPushdownFiltering {
+    partitionAttribs: Array[NamedReference]) extends SupportsBroadcastVarPushdownFiltering {
 
   val broadcastVarFilterExpressions: mutable.Set[Filter] = mutable.LinkedHashSet.empty
 

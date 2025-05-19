@@ -18,9 +18,7 @@
 package org.apache.spark.sql.execution.adaptive
 
 import java.util.concurrent.atomic.AtomicReference
-
-import scala.concurrent.Future
-
+import scala.concurrent.{ExecutionContext, Future}
 import org.apache.spark.{MapOutputStatistics, SparkException}
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.RDD
@@ -32,7 +30,9 @@ import org.apache.spark.sql.columnar.CachedBatch
 import org.apache.spark.sql.execution._
 import org.apache.spark.sql.execution.columnar.InMemoryTableScanLike
 import org.apache.spark.sql.execution.exchange._
+import org.apache.spark.sql.internal.{SQLConf, StaticSQLConf}
 import org.apache.spark.sql.vectorized.ColumnarBatch
+import org.apache.spark.util.ThreadUtils
 
 /**
  * A query stage is an independent subgraph of the query plan. AQE framework will materialize its
@@ -330,19 +330,9 @@ case class ResultQueryStageExec(
       ResultQueryStageExec.executionContext) {
       resultHandler(plan)
     }
-    val scalaPromise: Promise[Any] = Promise()
-    javaFuture.whenComplete { (result: Any, exception: Throwable) =>
-      if (exception != null) {
-        scalaPromise.failure(exception match {
-          case completionException: java.util.concurrent.CompletionException =>
-            completionException.getCause
-          case ex => ex
-        })
-      } else {
-        scalaPromise.success(result)
-      }
-    }
-    scalaPromise.future
+    Future {
+      javaFuture.get()
+    }(ResultQueryStageExec.executionContext)
   }
 
   // Result stage could be any SparkPlan, so we don't have a specific runtime statistics for it.

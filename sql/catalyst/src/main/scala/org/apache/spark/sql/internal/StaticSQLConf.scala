@@ -201,6 +201,15 @@ object StaticSQLConf {
       .checkValue(thres => thres > 0 && thres <= 128, "The threshold must be in (0,128].")
       .createWithDefault(128)
 
+  val RESULT_QUERY_STAGE_MAX_THREAD_THRESHOLD =
+    buildStaticConf("spark.sql.resultQueryStage.maxThreadThreshold")
+      .internal()
+      .doc("The maximum degree of parallelism to execute ResultQueryStageExec in AQE")
+      .version("3.0.0")
+      .intConf
+      .checkValue(thres => thres > 0 && thres <= 1024, "The threshold must be in (0,1024].")
+      .createWithDefault(1024)
+
   val SUBQUERY_MAX_THREAD_THRESHOLD =
     buildStaticConf("spark.sql.subquery.maxThreadThreshold")
       .internal()
