@@ -313,6 +313,14 @@ case class BatchScanExec(
     }
   }
 
+  override def inputRDD: RDD[InternalRow] = {
+    var local = inputRDDCached
+    if (local eq null) {
+      local = this.initializeInputRDD()
+    }
+    local
+  }
+
   override def keyGroupedPartitioning: Option[Seq[Expression]] =
     spjParams.keyGroupedPartitioning
 
@@ -375,6 +383,7 @@ case class BatchScanExec(
   def getTableIdentifier(): Option[TableIdentifier] = Some(TableIdentifier(table.name()))
 
   def getSchema(): StructType = this.schema
+
 }
 
 object BatchScanExec {
