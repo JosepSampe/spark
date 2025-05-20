@@ -205,7 +205,7 @@ abstract class DynamicPartitionPruningSuiteBase
     subqueryBroadcast.foreach { s =>
       s.child match {
         case _: ReusedExchangeExec => // reuse check ok.
-        case BroadcastQueryStageExec(_, _: ReusedExchangeExec, _) => // reuse check ok.
+        case BroadcastQueryStageExec(_, _: ReusedExchangeExec, _, _, _) => // reuse check ok.
         case b: BroadcastExchangeLike =>
           val hasReuse = plan.exists {
             case ReusedExchangeExec(_, e) => e eq b
@@ -345,7 +345,7 @@ abstract class DynamicPartitionPruningSuiteBase
        """.stripMargin)
 
       val found = df.queryExecution.executedPlan.exists {
-        case BroadcastHashJoinExec(_, _, p: ExistenceJoin, _, _, _, _, _) => true
+        case BroadcastHashJoinExec(_, _, p: ExistenceJoin, _, _, _, _, _, _) => true
         case _ => false
       }
 

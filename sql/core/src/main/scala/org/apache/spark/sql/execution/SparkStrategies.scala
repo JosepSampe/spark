@@ -172,8 +172,10 @@ abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
    *     Supports both equi-joins and non-equi-joins.
    *     Supports only inner like joins.
    */
-  object JoinSelection extends Strategy with JoinSelectionHelper {
+  class JoinSelection extends Strategy with JoinSelectionHelper {
     private val hintErrorHandler = conf.hintErrorHandler
+
+    private val broadcastedCanonicalizedSubplans = mutable.Set.empty[LogicalPlan]
 
     private def checkHintBuildSide(
         onlyLookingAtHint: Boolean,

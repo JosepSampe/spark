@@ -18,7 +18,9 @@
 package org.apache.spark.sql.execution.adaptive
 
 import java.util.concurrent.atomic.AtomicReference
+
 import scala.concurrent.{ExecutionContext, Future}
+
 import org.apache.spark.{MapOutputStatistics, SparkException}
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.RDD
