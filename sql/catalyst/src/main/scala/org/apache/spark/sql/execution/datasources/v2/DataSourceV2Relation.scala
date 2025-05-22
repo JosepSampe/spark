@@ -44,11 +44,11 @@ import org.apache.spark.util.Utils
  *                [[org.apache.spark.sql.connector.write.WriteBuilder]].
  */
 abstract class DataSourceV2RelationBase(
-    table: Table,
-    output: Seq[AttributeReference],
-    catalog: Option[CatalogPlugin],
-    identifier: Option[Identifier],
-    options: CaseInsensitiveStringMap)
+     table: Table,
+     output: Seq[AttributeReference],
+     catalog: Option[CatalogPlugin],
+     identifier: Option[Identifier],
+     options: CaseInsensitiveStringMap)
   extends LeafNode with MultiInstanceRelation with NamedRelation {
 
   import DataSourceV2Implicits._
@@ -99,13 +99,13 @@ abstract class DataSourceV2RelationBase(
  * A specialization of [[DataSourceV2RelationBase]] that supports batch scan.
  */
 case class DataSourceV2Relation(
-    table: Table,
-    override val output: Seq[AttributeReference],
-    catalog: Option[CatalogPlugin],
-    identifier: Option[Identifier],
-    options: CaseInsensitiveStringMap)
+     table: Table,
+     override val output: Seq[AttributeReference],
+     catalog: Option[CatalogPlugin],
+     identifier: Option[Identifier],
+     options: CaseInsensitiveStringMap)
   extends DataSourceV2RelationBase(table, output, catalog, identifier, options)
-  with ExposesMetadataColumns {
+    with ExposesMetadataColumns {
 
   import DataSourceV2Implicits._
 
@@ -146,11 +146,11 @@ case class DataSourceV2Relation(
  * @param ordering if set, the ordering provided by the scan
  */
 case class DataSourceV2ScanRelation(
-    relation: DataSourceV2Relation,
-    scan: Scan,
-    output: Seq[AttributeReference],
-    keyGroupedPartitioning: Option[Seq[Expression]] = None,
-    ordering: Option[Seq[SortOrder]] = None) extends LeafNode with NamedRelation {
+     relation: DataSourceV2Relation,
+     scan: Scan,
+     output: Seq[AttributeReference],
+     keyGroupedPartitioning: Option[Seq[Expression]] = None,
+     ordering: Option[Seq[SortOrder]] = None) extends LeafNode with NamedRelation {
 
   // because in case of proxy broadcast var push, the build leg plan in a cached stage
   // would already have materialized the stage so the runtime vars may have been pushed to

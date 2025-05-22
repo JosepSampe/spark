@@ -17,7 +17,10 @@
 
 package org.apache.spark.sql.catalyst.expressions
 
+import scala.collection.immutable
 import scala.collection.immutable.TreeSet
+
+import org.apache.spark.SparkUnsupportedOperationException
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.{CatalystTypeConverters, InternalRow}
 import org.apache.spark.sql.catalyst.analysis.TypeCheckResult
@@ -29,9 +32,11 @@ import org.apache.spark.sql.catalyst.expressions.codegen._
 import org.apache.spark.sql.catalyst.expressions.codegen.Block._
 import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, LeafNode, LogicalPlan, Project, Union}
 import org.apache.spark.sql.catalyst.trees.TreePattern._
-import org.apache.spark.sql.catalyst.util.TypeUtils
+import org.apache.spark.sql.catalyst.util.{CollationFactory, TypeUtils}
+import org.apache.spark.sql.catalyst.util.SparkStringUtils.truncatedString
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
+import org.apache.spark.unsafe.types.UTF8String
 import org.apache.spark.util.ArrayImplicits._
 
 /**
@@ -111,8 +116,8 @@ trait PredicateHelper extends AliasHelper with Logging {
    * along the way from plan to origin, and the origin LeafNode plan from which all the exp
    */
   def findExpressionAndTrackLineageDown(
-      exp: Expression,
-      plan: LogicalPlan): Option[(Expression, LogicalPlan)] = {
+       exp: Expression,
+       plan: LogicalPlan): Option[(Expression, LogicalPlan)] = {
     if (exp.references.isEmpty) return None
 
     plan match {
@@ -266,14 +271,12 @@ trait PredicateHelper extends AliasHelper with Logging {
   }
 
   // If one expression and its children are null intolerant, it is null intolerant.
-  protected def isNullIntolerant(expr: Expression): Boolean = expr match {
-    case e: NullIntolerant => e.children.forall(isNullIntolerant)
-    case _ => false
-  }
+  protected def isNullIntolerant(expr: Expression): Boolean =
+    expr.nullIntolerant && expr.children.forall(isNullIntolerant)
 
   protected def outputWithNullability(
-      output: Seq[Attribute],
-      nonNullAttrExprIds: Seq[ExprId]): Seq[Attribute] = {
+     output: Seq[Attribute],
+     nonNullAttrExprIds: Seq[ExprId]): Seq[Attribute] = {
     output.map { a =>
       if (a.nullable && nonNullAttrExprIds.contains(a.exprId)) {
         a.withNullability(false)
@@ -314,7 +317,8 @@ trait PredicateHelper extends AliasHelper with Logging {
   since = "1.0.0",
   group = "predicate_funcs")
 case class Not(child: Expression)
-  extends UnaryExpression with Predicate with ImplicitCastInputTypes with NullIntolerant {
+  extends UnaryExpression with Predicate with ImplicitCastInputTypes {
+  override def nullIntolerant: Boolean = true
 
   override def toString: String = s"NOT $child"
 
@@ -485,7 +489,10 @@ case class In(value: Expression, list: Seq[Expression]) extends Predicate {
     }
   }
 
-  override def toString: String = s"$value IN ${list.mkString("(", ",", ")")}"
+  override def simpleString(maxFields: Int): String =
+    s"$value IN ${truncatedString(list, "(", ",", ")", maxFields)}"
+
+  override def toString: String = simpleString(Int.MaxValue)
 
   override def eval(input: InternalRow): Any = {
     if (list.isEmpty && !legacyNullInEmptyBehavior) {
@@ -573,17 +580,17 @@ case class In(value: Expression, list: Seq[Expression]) extends Predicate {
 
       ev.copy(code =
         code"""
-           |${valueGen.code}
-           |byte $tmpResult = $HAS_NULL;
-           |if (!${valueGen.isNull}) {
-           |  $tmpResult = $NOT_MATCHED;
-           |  $javaDataType $valueArg = ${valueGen.value};
-           |  do {
-           |    $codes
-           |  } while (false);
-           |}
-           |final boolean ${ev.isNull} = ($tmpResult == $HAS_NULL);
-           |final boolean ${ev.value} = ($tmpResult == $MATCHED);
+              |${valueGen.code}
+              |byte $tmpResult = $HAS_NULL;
+              |if (!${valueGen.isNull}) {
+              |  $tmpResult = $NOT_MATCHED;
+              |  $javaDataType $valueArg = ${valueGen.value};
+              |  do {
+              |    $codes
+              |  } while (false);
+              |}
+              |final boolean ${ev.isNull} = ($tmpResult == $HAS_NULL);
+              |final boolean ${ev.value} = ($tmpResult == $MATCHED);
          """.stripMargin)
     }
   }
@@ -596,7 +603,6 @@ case class In(value: Expression, list: Seq[Expression]) extends Predicate {
 
   override protected def withNewChildrenInternal(newChildren: IndexedSeq[Expression]): In =
     copy(value = newChildren.head, list = newChildren.tail)
-
 }
 
 /**
@@ -607,14 +613,28 @@ case class InSet(child: Expression, hset: Set[Any]) extends UnaryExpression with
 
   require(hset != null, "hset could not be null")
 
-  override def toString: String = {
-    val listString = hset.toSeq
-      .map(elem => Literal(elem, child.dataType).toString)
-      // Sort elements for deterministic behaviours
-      .sorted
-      .mkString(", ")
-    s"$child INSET $listString"
+  override def simpleString(maxFields: Int): String = {
+    if (!child.resolved) {
+      return s"$child INSET (values with unresolved data types)"
+    }
+    if (hset.size <= maxFields) {
+      val listString = hset.toSeq
+        .map(elem => Literal(elem, child.dataType).toString)
+        // Sort elements for deterministic behaviours
+        .sorted
+        .mkString(", ")
+      s"$child INSET $listString"
+    } else {
+      // Skip sorting if there are many elements. Do not use truncatedString because we would have
+      // to convert elements we do not print to Literals.
+      val listString = hset.take(maxFields).toSeq
+        .map(elem => Literal(elem, child.dataType).toString)
+        .mkString(", ")
+      s"$child INSET $listString, ... ${hset.size - maxFields} more fields"
+    }
   }
+
+  override def toString: String = simpleString(Int.MaxValue)
 
   @transient private[this] lazy val hasNull: Boolean = hset.contains(null)
   @transient private[this] lazy val isNaN: Any => Boolean = child.dataType match {
@@ -656,6 +676,9 @@ case class InSet(child: Expression, hset: Set[Any]) extends UnaryExpression with
   }
 
   @transient lazy val set: Set[Any] = child.dataType match {
+    case st: StringType if !st.isUTF8BinaryCollation =>
+      new InSet.CollationAwareSet(
+        hset.asInstanceOf[Set[UTF8String]], st.collationId).asInstanceOf[Set[Any]]
     case t: AtomicType if !t.isInstanceOf[BinaryType] => hset
     case _: NullType => hset
     case _ =>
@@ -768,6 +791,26 @@ case class InSet(child: Expression, hset: Set[Any]) extends UnaryExpression with
   override protected def withNewChildInternal(newChild: Expression): InSet = copy(child = newChild)
 }
 
+object InSet {
+  class CollationAwareSet(inputSet: Set[UTF8String], collationId: Int)
+    extends immutable.Set[UTF8String] with Serializable {
+    private val keySet: Set[UTF8String] = inputSet.map { s =>
+      if (s == null) null
+      else CollationFactory.getCollationKey(s, collationId)
+    }
+    override def incl(elem: UTF8String): CollationAwareSet =
+      throw SparkUnsupportedOperationException()
+    override def excl(elem: UTF8String): CollationAwareSet =
+      throw SparkUnsupportedOperationException()
+    override def iterator: Iterator[UTF8String] = throw SparkUnsupportedOperationException()
+    override def contains(elem: UTF8String): Boolean = {
+      assert(elem != null, "InSet guarantees non-null input")
+      val elemKey = CollationFactory.getCollationKey(elem, collationId)
+      keySet.contains(elemKey)
+    }
+  }
+}
+
 @ExpressionDescription(
   usage = "expr1 _FUNC_ expr2 - Logical AND.",
   examples = """
@@ -804,7 +847,7 @@ case class And(left: Expression, right: Expression) extends BinaryOperator with 
   override def eval(input: InternalRow): Any = {
     val input1 = left.eval(input)
     if (input1 == false) {
-       false
+      false
     } else {
       val input2 = right.eval(input)
       if (input2 == false) {
@@ -970,7 +1013,7 @@ abstract class BinaryComparison extends BinaryOperator with Predicate {
 
   final override val nodePatterns: Seq[TreePattern] = Seq(BINARY_COMPARISON)
 
-  override lazy val canonicalized: Expression = {
+  override lazy val canonicalized: Expression =
     withNewChildren(children.map(_.canonicalized)) match {
       case EqualTo(l, r) if l.hashCode() > r.hashCode() => EqualTo(r, l)
       case EqualNullSafe(l, r) if l.hashCode() > r.hashCode() => EqualNullSafe(r, l)
@@ -983,7 +1026,7 @@ abstract class BinaryComparison extends BinaryOperator with Predicate {
 
       case other => other
     }
-  }
+
 
   override def checkInputDataTypes(): TypeCheckResult = super.checkInputDataTypes() match {
     case TypeCheckResult.TypeCheckSuccess =>
@@ -993,9 +1036,9 @@ abstract class BinaryComparison extends BinaryOperator with Predicate {
 
   override def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode = {
     if (CodeGenerator.isPrimitiveType(left.dataType)
-        && left.dataType != BooleanType // java boolean doesn't support > or < operator
-        && left.dataType != FloatType
-        && left.dataType != DoubleType) {
+      && left.dataType != BooleanType // java boolean doesn't support > or < operator
+      && left.dataType != FloatType
+      && left.dataType != DoubleType) {
       // faster version
       defineCodeGen(ctx, ev, (c1, c2) => s"$c1 $symbol $c2")
     } else {
@@ -1004,6 +1047,8 @@ abstract class BinaryComparison extends BinaryOperator with Predicate {
   }
 
   protected lazy val ordering: Ordering[Any] = TypeUtils.getInterpretedOrdering(left.dataType)
+
+  def reverseOperands(): BinaryComparison
 }
 
 
@@ -1045,8 +1090,8 @@ object Equality {
   since = "1.0.0",
   group = "predicate_funcs")
 case class EqualTo(left: Expression, right: Expression)
-    extends BinaryComparison with NullIntolerant {
-
+  extends BinaryComparison {
+  override def nullIntolerant: Boolean = true
   override def symbol: String = "="
 
   // +---------+---------+---------+---------+
@@ -1064,6 +1109,8 @@ case class EqualTo(left: Expression, right: Expression)
 
   override protected def withNewChildrenInternal(
     newLeft: Expression, newRight: Expression): EqualTo = copy(left = newLeft, right = newRight)
+
+  def reverseOperands(): BinaryComparison = this
 }
 
 // TODO: although map type is not orderable, technically map type should be able to be used
@@ -1129,6 +1176,8 @@ case class EqualNullSafe(left: Expression, right: Expression) extends BinaryComp
   override protected def withNewChildrenInternal(
       newLeft: Expression, newRight: Expression): EqualNullSafe =
     copy(left = newLeft, right = newRight)
+
+  def reverseOperands(): BinaryComparison = this
 }
 
 @ExpressionDescription(
@@ -1194,14 +1243,16 @@ case class EqualNull(left: Expression, right: Expression, replacement: Expressio
   since = "1.0.0",
   group = "predicate_funcs")
 case class LessThan(left: Expression, right: Expression)
-    extends BinaryComparison with NullIntolerant {
-
+  extends BinaryComparison {
+  override def nullIntolerant: Boolean = true
   override def symbol: String = "<"
 
   protected override def nullSafeEval(input1: Any, input2: Any): Any = ordering.lt(input1, input2)
 
   override protected def withNewChildrenInternal(
     newLeft: Expression, newRight: Expression): Expression = copy(left = newLeft, right = newRight)
+
+  def reverseOperands(): BinaryComparison = GreaterThan(right, left)
 }
 
 @ExpressionDescription(
@@ -1229,14 +1280,16 @@ case class LessThan(left: Expression, right: Expression)
   since = "1.0.0",
   group = "predicate_funcs")
 case class LessThanOrEqual(left: Expression, right: Expression)
-    extends BinaryComparison with NullIntolerant {
-
+  extends BinaryComparison {
+  override def nullIntolerant: Boolean = true
   override def symbol: String = "<="
 
   protected override def nullSafeEval(input1: Any, input2: Any): Any = ordering.lteq(input1, input2)
 
   override protected def withNewChildrenInternal(
     newLeft: Expression, newRight: Expression): Expression = copy(left = newLeft, right = newRight)
+
+  def reverseOperands(): BinaryComparison = GreaterThanOrEqual(right, left)
 }
 
 @ExpressionDescription(
@@ -1264,7 +1317,8 @@ case class LessThanOrEqual(left: Expression, right: Expression)
   since = "1.0.0",
   group = "predicate_funcs")
 case class GreaterThan(left: Expression, right: Expression)
-    extends BinaryComparison with NullIntolerant {
+  extends BinaryComparison {
+  override def nullIntolerant: Boolean = true
 
   override def symbol: String = ">"
 
@@ -1272,6 +1326,8 @@ case class GreaterThan(left: Expression, right: Expression)
 
   override protected def withNewChildrenInternal(
     newLeft: Expression, newRight: Expression): Expression = copy(left = newLeft, right = newRight)
+
+  def reverseOperands(): BinaryComparison = LessThan(right, left)
 }
 
 @ExpressionDescription(
@@ -1299,7 +1355,8 @@ case class GreaterThan(left: Expression, right: Expression)
   since = "1.0.0",
   group = "predicate_funcs")
 case class GreaterThanOrEqual(left: Expression, right: Expression)
-    extends BinaryComparison with NullIntolerant {
+  extends BinaryComparison {
+  override def nullIntolerant: Boolean = true
 
   override def symbol: String = ">="
 
@@ -1308,28 +1365,8 @@ case class GreaterThanOrEqual(left: Expression, right: Expression)
   override protected def withNewChildrenInternal(
       newLeft: Expression, newRight: Expression): GreaterThanOrEqual =
     copy(left = newLeft, right = newRight)
-}
 
-/**
- * IS UNKNOWN and IS NOT UNKNOWN are the same as IS NULL and IS NOT NULL, respectively,
- * except that the input expression must be of a boolean type.
- */
-object IsUnknown {
-  def apply(child: Expression): Predicate = {
-    new IsNull(child) with ExpectsInputTypes {
-      override def inputTypes: Seq[DataType] = Seq(BooleanType)
-      override def sql: String = s"(${this.child.sql} IS UNKNOWN)"
-    }
-  }
-}
-
-object IsNotUnknown {
-  def apply(child: Expression): Predicate = {
-    new IsNotNull(child) with ExpectsInputTypes {
-      override def inputTypes: Seq[DataType] = Seq(BooleanType)
-      override def sql: String = s"(${this.child.sql} IS NOT UNKNOWN)"
-    }
-  }
+  def reverseOperands(): BinaryComparison = LessThanOrEqual(right, left)
 }
 
 case class InWithBroadcastVar(
@@ -1458,4 +1495,27 @@ case class InWithBroadcastVar(
 
   override protected def withNewChildInternal(newChild: Expression): InWithBroadcastVar =
     copy(child = newChild)
+}
+
+
+/**
+ * IS UNKNOWN and IS NOT UNKNOWN are the same as IS NULL and IS NOT NULL, respectively,
+ * except that the input expression must be of a boolean type.
+ */
+object IsUnknown {
+  def apply(child: Expression): Predicate = {
+    new IsNull(child) with ExpectsInputTypes {
+      override def inputTypes: Seq[DataType] = Seq(BooleanType)
+      override def sql: String = s"(${this.child.sql} IS UNKNOWN)"
+    }
+  }
+}
+
+object IsNotUnknown {
+  def apply(child: Expression): Predicate = {
+    new IsNotNull(child) with ExpectsInputTypes {
+      override def inputTypes: Seq[DataType] = Seq(BooleanType)
+      override def sql: String = s"(${this.child.sql} IS NOT UNKNOWN)"
+    }
+  }
 }

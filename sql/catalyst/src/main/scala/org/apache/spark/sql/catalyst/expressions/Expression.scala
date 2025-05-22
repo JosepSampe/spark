@@ -142,6 +142,13 @@ abstract class Expression extends TreeNode[Expression] {
   def stateful: Boolean = false
 
   /**
+   * When an expression inherits this, meaning the expression is null intolerant (i.e. any null
+   * input will result in null output). We will use this information during constructing IsNotNull
+   * constraints.
+   */
+  def nullIntolerant: Boolean = false
+
+  /**
    * Returns true if the expression could potentially throw an exception when evaluated.
    */
   lazy val throwable: Boolean = children.exists(_.throwable)

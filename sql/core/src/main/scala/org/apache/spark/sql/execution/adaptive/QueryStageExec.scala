@@ -19,7 +19,7 @@ package org.apache.spark.sql.execution.adaptive
 
 import java.util.concurrent.atomic.AtomicReference
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.Future
 
 import org.apache.spark.{MapOutputStatistics, SparkException}
 import org.apache.spark.broadcast.Broadcast
@@ -32,9 +32,7 @@ import org.apache.spark.sql.columnar.CachedBatch
 import org.apache.spark.sql.execution._
 import org.apache.spark.sql.execution.columnar.InMemoryTableScanLike
 import org.apache.spark.sql.execution.exchange._
-import org.apache.spark.sql.internal.{SQLConf, StaticSQLConf}
 import org.apache.spark.sql.vectorized.ColumnarBatch
-import org.apache.spark.util.ThreadUtils
 
 /**
  * A query stage is an independent subgraph of the query plan. AQE framework will materialize its
@@ -101,6 +99,13 @@ abstract class QueryStageExec extends LeafExecNode {
   private[adaptive] def resultOption: AtomicReference[Option[Any]] = _resultOption
   final def isMaterialized: Boolean = resultOption.get().isDefined
 
+  @transient
+  @volatile
+  protected var _error = new AtomicReference[Option[Throwable]](None)
+
+  def error: AtomicReference[Option[Throwable]] = _error
+  final def hasFailed: Boolean = _error.get().isDefined
+
   override def output: Seq[Attribute] = plan.output
   override def outputPartitioning: Partitioning = plan.outputPartitioning
   override def outputOrdering: Seq[SortOrder] = plan.outputOrdering
@@ -122,15 +127,15 @@ abstract class QueryStageExec extends LeafExecNode {
   }
 
   override def generateTreeString(
-      depth: Int,
-      lastChildren: java.util.ArrayList[Boolean],
-      append: String => Unit,
-      verbose: Boolean,
-      prefix: String = "",
-      addSuffix: Boolean = false,
-      maxFields: Int,
-      printNodeId: Boolean,
-      indent: Int = 0): Unit = {
+     depth: Int,
+     lastChildren: java.util.ArrayList[Boolean],
+     append: String => Unit,
+     verbose: Boolean,
+     prefix: String = "",
+     addSuffix: Boolean = false,
+     maxFields: Int,
+     printNodeId: Boolean,
+     indent: Int = 0): Unit = {
     super.generateTreeString(depth,
       lastChildren,
       append,
@@ -209,14 +214,15 @@ case class ShuffleQueryStageExec(
   override protected def doMaterialize(): Future[Any] = shuffle.submitShuffleJob()
 
   override def newReuseInstance(
-         newStageId: Int,
-         newOutput: Seq[Attribute],
-         hasStreamSidePushdownDependent: Boolean): ExchangeQueryStageExec = {
+     newStageId: Int,
+     newOutput: Seq[Attribute],
+     hasStreamSidePushdownDependent: Boolean): ExchangeQueryStageExec = {
     val reuse = ShuffleQueryStageExec(
       newStageId,
       ReusedExchangeExec(newOutput, shuffle),
       _canonicalized, Option(this.id))
     reuse._resultOption = this._resultOption
+    reuse._error = this._error
     reuse
   }
 
@@ -269,6 +275,7 @@ case class BroadcastQueryStageExec(
       Option(this.id),
       hasStreamSidePushdownDependent = hasStreamSidePushdownDependent)
     reuse._resultOption = this._resultOption
+    reuse._error = this._error
     reuse
   }
 
@@ -285,11 +292,9 @@ case class BroadcastQueryStageExec(
  * @param plan the underlying plan.
  */
 case class TableCacheQueryStageExec(
-    override val id: Int,
-    override val plan: SparkPlan) extends QueryStageExec {
-
+     override val id: Int,
+     override val plan: SparkPlan) extends QueryStageExec {
   val reuseSource: Option[Int] = None
-
   @transient val inMemoryTableScan = plan match {
     case i: InMemoryTableScanLike => i
     case _ =>
@@ -315,34 +320,4 @@ case class TableCacheQueryStageExec(
   override protected def doMaterialize(): Future[Any] = future
 
   override def getRuntimeStatistics: Statistics = inMemoryTableScan.runtimeStatistics
-}
-
-case class ResultQueryStageExec(
-       override val id: Int,
-       override val plan: SparkPlan,
-       resultHandler: SparkPlan => Any) extends QueryStageExec {
-  val reuseSource: Option[Int] = None
-  override def resetMetrics(): Unit = {
-    plan.resetMetrics()
-  }
-
-  override protected def doMaterialize(): Future[Any] = {
-    val javaFuture = SQLExecution.withThreadLocalCaptured(
-      session,
-      ResultQueryStageExec.executionContext) {
-      resultHandler(plan)
-    }
-    Future {
-      javaFuture.get()
-    }(ResultQueryStageExec.executionContext)
-  }
-
-  // Result stage could be any SparkPlan, so we don't have a specific runtime statistics for it.
-  override def getRuntimeStatistics: Statistics = Statistics.DUMMY
-}
-
-object ResultQueryStageExec {
-  private[execution] val executionContext = ExecutionContext.fromExecutorService(
-    ThreadUtils.newDaemonCachedThreadPool("ResultQueryStageExecution",
-      SQLConf.get.getConf(StaticSQLConf.RESULT_QUERY_STAGE_MAX_THREAD_THRESHOLD)))
 }

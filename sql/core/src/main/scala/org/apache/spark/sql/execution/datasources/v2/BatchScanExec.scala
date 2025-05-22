@@ -48,9 +48,9 @@ case class BatchScanExec(
     @transient proxyForPushedBroadcastVar: Option[Seq[ProxyBroadcastVarAndStageIdentifier]] =
     None) extends DataSourceV2ScanExecBase  with WrapsBroadcastVarPushDownSupporter {
 
+  @transient lazy val batch: Batch = if (scan == null) null else scan.toBatch
   @transient @volatile private var filteredPartitions: Seq[Seq[InputPartition]] = _
   @transient @volatile private var inputRDDCached: RDD[InternalRow] = _
-  @transient lazy val batch: Batch = if (scan == null) null else scan.toBatch
 
   // TODO: unify the equal/hashCode implementation for all data source v2 query plans.
   override def equals(other: Any): Boolean = other match {
@@ -115,13 +115,12 @@ case class BatchScanExec(
 
       // call toBatch again to get filtered partitions
       val newPartitions = scan.toBatch.planInputPartitions()
-
       this.filteredPartitions = originalPartitioning match {
         case p: KeyGroupedPartitioning =>
           if (newPartitions.exists(!_.isInstanceOf[HasPartitionKey])) {
             throw new SparkException("Data source must have preserved the original partitioning " +
-                "during runtime filtering: not all partitions implement HasPartitionKey after " +
-                "filtering")
+              "during runtime filtering: not all partitions implement HasPartitionKey after " +
+              "filtering")
           }
           val newPartitionValues = newPartitions.map(partition =>
               InternalRowComparableWrapper(partition.asInstanceOf[HasPartitionKey], p.expressions))
@@ -133,14 +132,14 @@ case class BatchScanExec(
           // those missing values that are not present in the new input partitions.
           if (oldPartitionValues.size < newPartitionValues.size) {
             throw new SparkException("During runtime filtering, data source must either report " +
-                "the same number of partition values, or a subset of partition values from the " +
-                s"original. Before: ${oldPartitionValues.size} partition values. " +
-                s"After: ${newPartitionValues.size} partition values")
+              "the same number of partition values, or a subset of partition values from the " +
+              s"original. Before: ${oldPartitionValues.size} partition values. " +
+              s"After: ${newPartitionValues.size} partition values")
           }
 
           if (!newPartitionValues.forall(oldPartitionValues.contains)) {
             throw new SparkException("During runtime filtering, data source must not report new " +
-                "partition values that are not present in the original partitioning.")
+              "partition values that are not present in the original partitioning.")
           }
 
           groupPartitions(newPartitions.toImmutableArraySeq)
@@ -168,9 +167,9 @@ case class BatchScanExec(
           case Some(commonPartValues) =>
             // We allow duplicated partition values if
             // `spark.sql.sources.v2.bucketing.partiallyClusteredDistribution.enabled` is true
-             commonPartValues.flatMap {
-               case (partValue, numSplits) => Seq.fill(numSplits)(partValue)
-             }
+            commonPartValues.flatMap {
+              case (partValue, numSplits) => Seq.fill(numSplits)(partValue)
+            }
           case None =>
             spjParams.joinKeyPositions match {
               case Some(projectionPositions) => k.partitionValues.map{r =>
@@ -242,34 +241,34 @@ case class BatchScanExec(
                 // A mapping from the common partition values to how many splits the partition
                 // should contain.
                 val commonPartValuesMap = spjParams.commonPartitionValues
-                    .get
-                    .map(t => (InternalRowComparableWrapper(t._1, partExpressions), t._2))
-                    .toMap
+                  .get
+                  .map(t => (InternalRowComparableWrapper(t._1, partExpressions), t._2))
+                  .toMap
                 val filteredGroupedPartitions = finalGroupedPartitions.filter {
                   case (partValues, _) =>
-                   commonPartValuesMap.keySet.contains(
-                    InternalRowComparableWrapper(partValues, partExpressions))
+                    commonPartValuesMap.keySet.contains(
+                      InternalRowComparableWrapper(partValues, partExpressions))
                 }
                 val nestGroupedPartitions = filteredGroupedPartitions.map {
                   case (partValue, splits) =>
-                  // `commonPartValuesMap` should contain the part value since it's the super set.
-                  val numSplits = commonPartValuesMap
+                    // `commonPartValuesMap` should contain the part value since it's the super set.
+                    val numSplits = commonPartValuesMap
                       .get(InternalRowComparableWrapper(partValue, partExpressions))
-                  assert(numSplits.isDefined, s"Partition value $partValue does not exist in " +
+                    assert(numSplits.isDefined, s"Partition value $partValue does not exist in " +
                       "common partition values from Spark plan")
 
-                  val newSplits = if (spjParams.replicatePartitions) {
-                    // We need to also replicate partitions according to the other side of join
-                    Seq.fill(numSplits.get)(splits)
-                  } else {
-                    // Not grouping by partition values: this could be the side with partially
-                    // clustered distribution. Because of dynamic filtering, we'll need to check
-                    // if the final number of splits of a partition is smaller than the original
-                    // number, and fill with empty splits if so. This is necessary so that both
-                    // sides of a join will have the same number of partitions & splits.
-                    splits.map(Seq(_)).padTo(numSplits.get, Seq.empty)
-                  }
-                  (InternalRowComparableWrapper(partValue, partExpressions), newSplits)
+                    val newSplits = if (spjParams.replicatePartitions) {
+                      // We need to also replicate partitions according to the other side of join
+                      Seq.fill(numSplits.get)(splits)
+                    } else {
+                      // Not grouping by partition values: this could be the side with partially
+                      // clustered distribution. Because of dynamic filtering, we'll need to check
+                      // if the final number of splits of a partition is smaller than the original
+                      // number, and fill with empty splits if so. This is necessary so that both
+                      // sides of a join will have the same number of partitions & splits.
+                      splits.map(Seq(_)).padTo(numSplits.get, Seq.empty)
+                    }
+                    (InternalRowComparableWrapper(partValue, partExpressions), newSplits)
                 }
 
                 // Now fill missing partition keys with empty partitions
@@ -383,7 +382,6 @@ case class BatchScanExec(
   def getTableIdentifier(): Option[TableIdentifier] = Some(TableIdentifier(table.name()))
 
   def getSchema(): StructType = this.schema
-
 }
 
 object BatchScanExec {
@@ -392,18 +390,18 @@ object BatchScanExec {
 }
 
 case class StoragePartitionJoinParams(
-    keyGroupedPartitioning: Option[Seq[Expression]] = None,
-    joinKeyPositions: Option[Seq[Int]] = None,
-    commonPartitionValues: Option[Seq[(InternalRow, Int)]] = None,
-    reducers: Option[Seq[Option[Reducer[_, _]]]] = None,
-    applyPartialClustering: Boolean = false,
-    replicatePartitions: Boolean = false) {
+       keyGroupedPartitioning: Option[Seq[Expression]] = None,
+       joinKeyPositions: Option[Seq[Int]] = None,
+       commonPartitionValues: Option[Seq[(InternalRow, Int)]] = None,
+       reducers: Option[Seq[Option[Reducer[_, _]]]] = None,
+       applyPartialClustering: Boolean = false,
+       replicatePartitions: Boolean = false) {
   override def equals(other: Any): Boolean = other match {
     case other: StoragePartitionJoinParams =>
       this.commonPartitionValues == other.commonPartitionValues &&
-      this.replicatePartitions == other.replicatePartitions &&
-      this.applyPartialClustering == other.applyPartialClustering &&
-      this.joinKeyPositions == other.joinKeyPositions
+        this.replicatePartitions == other.replicatePartitions &&
+        this.applyPartialClustering == other.applyPartialClustering &&
+        this.joinKeyPositions == other.joinKeyPositions
     case _ =>
       false
   }
